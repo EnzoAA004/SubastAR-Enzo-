@@ -42,8 +42,10 @@ public class AuthController {
 
     @PostMapping("/verificar-codigo")
     public ResponseEntity<Map<String, String>> verificarCodigo(@Valid @RequestBody VerificarCodigoRequest req) {
-        authService.verificarCodigo(req);
-        return ResponseEntity.ok(Map.of("message", "Código verificado correctamente. Podés crear tu contraseña."));
+        String token = authService.verificarCodigo(req);
+        return ResponseEntity.ok(Map.of(
+                "message", "Código verificado correctamente. Podés crear tu contraseña.",
+                "token_verificacion", token));
     }
 
     @PostMapping("/completar-registro")
