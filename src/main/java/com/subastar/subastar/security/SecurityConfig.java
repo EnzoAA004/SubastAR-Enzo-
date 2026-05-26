@@ -47,6 +47,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.POST, "/auth/registro", "/auth/verificar-codigo",
                         "/auth/completar-registro", "/auth/login").permitAll()
+                .requestMatchers(HttpMethod.GET, "/subastas/*/resultado/**").authenticated()
                 .requestMatchers(HttpMethod.GET, "/subastas", "/subastas/**").permitAll()
                 .anyRequest().authenticated()
             )

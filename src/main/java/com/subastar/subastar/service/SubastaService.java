@@ -28,6 +28,7 @@ public class SubastaService {
     private final RegistroDeSubastaRepository registroDeSubastaRepository;
     private final ProductoDetalleRepository productoDetalleRepository;
     private final FotoRepository fotoRepository;
+    private final CredencialRepository credencialRepository;
 
     public List<SubastaResumen> listar(String estado, String categoria, String moneda, String busqueda) {
         return subastaRepository.findAll().stream()
@@ -112,6 +113,35 @@ public class SubastaService {
             }
         }
         return resp;
+    }
+
+    public ResultadoPujaResponse getResultado(Integer subastaId, Integer itemId, String email) {
+        subastaRepository.findById(subastaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Subasta no encontrada"));
+        ItemCatalogo item = itemCatalogoRepository.findById(itemId)
+                .orElseThrow(() -> new ResourceNotFoundException("Item no encontrado"));
+        if (!item.getCatalogo().getSubasta().getIdentificador().equals(subastaId)) {
+            throw new ResourceNotFoundException("Item no encontrado en la subasta");
+        }
+        ResultadoPujaResponse response = new ResultadoPujaResponse();
+        response.setItemId(itemId);
+        response.setNombreItem(item.getProducto().getDescripcionCatalogo());
+        if (!"si".equals(item.getSubastado())) {
+            response.setEstado("en_curso");
+            return response;
+        }
+        Integer clienteId = credencialRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"))
+                .getPersonaId();
+        Pujo ganador = pujoRepository.findGanadorByItemId(itemId).orElse(null);
+        if (ganador == null) {
+            response.setEstado("sin_pujas");
+            return response;
+        }
+        response.setEstado("finalizada");
+        response.setMontoFinal(ganador.getImporte());
+        response.setFueGanador(ganador.getAsistente().getCliente().getIdentificador().equals(clienteId));
+        return response;
     }
 
     private SubastaResumen toResumen(Subasta s) {
