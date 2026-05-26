@@ -1,0 +1,368 @@
+package com.subastar.subastar.service;
+
+import com.subastar.subastar.dto.bien.*;
+import com.subastar.subastar.exception.BadRequestException;
+import com.subastar.subastar.exception.ForbiddenException;
+import com.subastar.subastar.exception.ResourceNotFoundException;
+import com.subastar.subastar.model.*;
+import com.subastar.subastar.repository.*;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Service
+@Transactional
+@RequiredArgsConstructor
+public class BienService {
+
+    private final BienSolicitudRepository bienSolicitudRepository;
+    private final BienSolicitudArchivoRepository bienSolicitudArchivoRepository;
+    private final ProductoDetalleRepository productoDetalleRepository;
+    private final ProductoRepository productoRepository;
+    private final CredencialRepository credencialRepository;
+    private final ClienteRepository clienteRepository;
+    private final ItemCatalogoRepository itemCatalogoRepository;
+    private final CatalogoRepository catalogoRepository;
+    private final EmpleadoRepository empleadoRepository;
+    private final DuenioRepository duenioRepository;
+
+    private static final int MIN_FOTOS = 6;
+
+    public BienSolicitudResponse iniciarSolicitud(String email, CrearBienSolicitudRequest req) {
+        validarTipo(req.getTipo());
+        Integer clienteId = getClienteId(email);
+        Cliente cliente = clienteRepository.findById(clienteId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado"));
+
+        BienSolicitud sol = new BienSolicitud();
+        sol.setCodigoSolicitud(generarCodigo());
+        sol.setCliente(cliente);
+        sol.setTipo(req.getTipo());
+        sol.setEstado("iniciada");
+        sol.setPasoActual("datos");
+        bienSolicitudRepository.save(sol);
+        return toResponse(sol);
+    }
+
+    @Transactional
+    public BienSolicitudResponse cargarDatos(String email, String codigoSolicitud, BienDatosRequest req) {
+        BienSolicitud sol = getSolicitudDelCliente(email, codigoSolicitud);
+
+        if ("objeto_disenador".equals(req.getTipo())) {
+            if (req.getArtistaDisenador() == null || req.getArtistaDisenador().isBlank()) {
+                throw new BadRequestException("artista_disenador es requerido para tipo objeto_disenador");
+            }
+            if (req.getFechaCreacion() == null) {
+                throw new BadRequestException("fecha_creacion es requerida para tipo objeto_disenador");
+            }
+        }
+        if ("otro".equals(req.getTipo()) && (req.getInformacionAdicional() == null || req.getInformacionAdicional().isBlank())) {
+            throw new BadRequestException("informacion_adicional es requerida para tipo otro");
+        }
+
+        sol.setNombre(req.getNombre());
+        sol.setDescripcionTecnica(req.getDescripcionTecnica());
+        sol.setCantidadElementos(req.getCantidadElementos());
+        sol.setEpocaOrigen(req.getEpocaOrigen());
+        sol.setArtistaDisenador(req.getArtistaDisenador());
+        sol.setFechaCreacionObra(req.getFechaCreacion());
+        sol.setDatosHistoricos(req.getDatosHistoricos());
+        sol.setInformacionAdicional(req.getInformacionAdicional());
+        sol.setEstado("datos_cargados");
+        sol.setPasoActual("fotos");
+        bienSolicitudRepository.save(sol);
+        return toResponse(sol);
+    }
+
+    @Transactional
+    public BienSolicitudResponse cargarFotos(String email, String codigoSolicitud, List<MultipartFile> fotos) {
+        BienSolicitud sol = getSolicitudDelCliente(email, codigoSolicitud);
+
+        if (fotos == null || fotos.isEmpty()) throw new BadRequestException("Se debe enviar al menos una foto");
+
+        for (MultipartFile f : fotos) {
+            BienSolicitudArchivo arch = new BienSolicitudArchivo();
+            arch.setCodigoArchivo("FOTO-" + UUID.randomUUID());
+            arch.setSolicitud(sol);
+            arch.setNombreArchivo(f.getOriginalFilename() != null ? f.getOriginalFilename() : "foto.jpg");
+            arch.setTipoArchivo("foto");
+            try {
+                arch.setDatos(f.getBytes());
+            } catch (IOException e) {
+                throw new BadRequestException("Error al procesar la foto: " + f.getOriginalFilename());
+            }
+            bienSolicitudArchivoRepository.save(arch);
+        }
+
+        int totalFotos = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(sol.getId(), "foto");
+        if (totalFotos >= MIN_FOTOS) {
+            sol.setEstado("fotos_cargadas");
+            sol.setPasoActual("documentos");
+            bienSolicitudRepository.save(sol);
+        }
+        return toResponse(sol);
+    }
+
+    @Transactional
+    public void eliminarFoto(String email, String codigoSolicitud, String codigoFoto) {
+        BienSolicitud sol = getSolicitudDelCliente(email, codigoSolicitud);
+        BienSolicitudArchivo arch = bienSolicitudArchivoRepository.findByCodigoArchivo(codigoFoto)
+                .orElseThrow(() -> new ResourceNotFoundException("Foto no encontrada"));
+        if (!arch.getSolicitud().getId().equals(sol.getId())) throw new ForbiddenException("La foto no pertenece a esta solicitud");
+        bienSolicitudArchivoRepository.delete(arch);
+    }
+
+    @Transactional
+    public BienSolicitudResponse cargarDocumentos(String email, String codigoSolicitud,
+                                                   CargarDocumentosBienRequest req, List<MultipartFile> docs) {
+        BienSolicitud sol = getSolicitudDelCliente(email, codigoSolicitud);
+
+        if (Boolean.TRUE.equals(req.getDeclaraPropiedad())) {
+            sol.setDeclaraPropiedad(true);
+        }
+
+        if (docs != null) {
+            for (MultipartFile f : docs) {
+                if (f == null || f.isEmpty()) continue;
+                BienSolicitudArchivo arch = new BienSolicitudArchivo();
+                arch.setCodigoArchivo("DOC-" + UUID.randomUUID());
+                arch.setSolicitud(sol);
+                arch.setNombreArchivo(f.getOriginalFilename() != null ? f.getOriginalFilename() : "doc.pdf");
+                arch.setTipoArchivo("documento");
+                try {
+                    arch.setDatos(f.getBytes());
+                } catch (IOException e) {
+                    throw new BadRequestException("Error al procesar el documento: " + f.getOriginalFilename());
+                }
+                bienSolicitudArchivoRepository.save(arch);
+            }
+        }
+
+        sol.setEstado("documentos_cargados");
+        sol.setPasoActual("confirmar");
+        bienSolicitudRepository.save(sol);
+        return toResponse(sol);
+    }
+
+    @Transactional
+    public void eliminarDocumento(String email, String codigoSolicitud, String codigoDoc) {
+        BienSolicitud sol = getSolicitudDelCliente(email, codigoSolicitud);
+        BienSolicitudArchivo arch = bienSolicitudArchivoRepository.findByCodigoArchivo(codigoDoc)
+                .orElseThrow(() -> new ResourceNotFoundException("Documento no encontrado"));
+        if (!arch.getSolicitud().getId().equals(sol.getId())) throw new ForbiddenException("El documento no pertenece a esta solicitud");
+        bienSolicitudArchivoRepository.delete(arch);
+    }
+
+    @Transactional
+    public BienSolicitudEnviadaResponse confirmar(String email, String codigoSolicitud) {
+        BienSolicitud sol = getSolicitudDelCliente(email, codigoSolicitud);
+
+        int fotos = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(sol.getId(), "foto");
+        if (fotos < MIN_FOTOS) throw new BadRequestException("Se requieren al menos " + MIN_FOTOS + " fotos");
+        if (!sol.isDeclaraPropiedad()) throw new BadRequestException("Debe aceptar la declaración de propiedad");
+        if (sol.getNombre() == null) throw new BadRequestException("Los datos del bien son incompletos");
+
+        Empleado revisor = empleadoRepository.findAll().stream().findFirst()
+                .orElseThrow(() -> new BadRequestException("No hay empleados disponibles para procesar la solicitud. Contacte al administrador."));
+
+        Integer clienteId = sol.getCliente().getIdentificador();
+        Duenio duenio = duenioRepository.findById(clienteId).orElseGet(() -> {
+            Duenio d = new Duenio();
+            d.setIdentificador(clienteId);
+            d.setVerificadorId(revisor.getIdentificador());
+            if (sol.getCliente().getPais() != null) {
+                d.setNumeroPaisId(sol.getCliente().getPais().getNumero());
+            }
+            return duenioRepository.save(d);
+        });
+
+        Producto producto = new Producto();
+        producto.setFecha(LocalDate.now());
+        producto.setDisponible("no");
+        producto.setDescripcionCatalogo(sol.getNombre());
+        producto.setDescripcionCompleta(sol.getDescripcionTecnica() != null ? sol.getDescripcionTecnica() : sol.getNombre());
+        producto.setRevisor(revisor);
+        producto.setDuenio(duenio);
+        producto = productoRepository.save(producto);
+
+        ProductoDetalle det = new ProductoDetalle();
+        det.setProductoId(producto.getIdentificador());
+        det.setClienteId(clienteId);
+        det.setNombre(sol.getNombre());
+        det.setTipo(sol.getTipo());
+        det.setCantidadElementos(sol.getCantidadElementos());
+        det.setEpocaOrigen(sol.getEpocaOrigen());
+        det.setArtistaDisenador(sol.getArtistaDisenador());
+        det.setFechaCreacionObra(sol.getFechaCreacionObra());
+        det.setDatosHistoricos(sol.getDatosHistoricos());
+        det.setInformacionAdicional(sol.getInformacionAdicional());
+        det.setEstadoSolicitud("en_revision");
+        productoDetalleRepository.save(det);
+
+        sol.setEstado("enviado_a_revision");
+        sol.setPasoActual("finalizado");
+        sol.setProductoId(producto.getIdentificador());
+        bienSolicitudRepository.save(sol);
+
+        BienSolicitudEnviadaResponse resp = new BienSolicitudEnviadaResponse();
+        resp.setCodigoSolicitud(sol.getCodigoSolicitud());
+        resp.setCodigoBien("BIEN-" + producto.getIdentificador());
+        resp.setEstado("en_revision");
+        resp.setMessage("Tu bien fue enviado para revisión. Te notificaremos cuando la empresa complete la inspección y te informaremos la fecha, valor base y comisiones.");
+        return resp;
+    }
+
+    public List<BienResumen> getMisBienes(String email, String estadoFiltro) {
+        Integer clienteId = getClienteId(email);
+        List<ProductoDetalle> detalles = estadoFiltro != null
+                ? productoDetalleRepository.findByClienteIdAndEstadoSolicitud(clienteId, estadoFiltro)
+                : productoDetalleRepository.findByClienteId(clienteId);
+        return detalles.stream().map(this::toBienResumen).collect(Collectors.toList());
+    }
+
+    public BienDetalle getMiBien(String email, Integer productoId) {
+        Integer clienteId = getClienteId(email);
+        ProductoDetalle det = productoDetalleRepository.findById(productoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Bien no encontrado"));
+        if (!clienteId.equals(det.getClienteId())) throw new ForbiddenException("El bien no pertenece al usuario");
+        return toBienDetalle(det);
+    }
+
+    @Transactional
+    public void aceptarCondiciones(String email, Integer productoId, boolean acepta) {
+        Integer clienteId = getClienteId(email);
+        ProductoDetalle det = productoDetalleRepository.findById(productoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Bien no encontrado"));
+        if (!clienteId.equals(det.getClienteId())) throw new ForbiddenException("El bien no pertenece al usuario");
+        if (!acepta) {
+            det.setEstadoSolicitud("rechazado");
+            det.setMotivoRechazo("El usuario rechazó las condiciones propuestas");
+        }
+        productoDetalleRepository.save(det);
+    }
+
+    private BienResumen toBienResumen(ProductoDetalle det) {
+        BienResumen r = new BienResumen();
+        r.setId(det.getProductoId());
+        r.setNombre(det.getNombre());
+        r.setEstado(det.getEstadoSolicitud());
+        r.setMotivoRechazo(det.getMotivoRechazo());
+        r.setUbicacionDeposito(det.getUbicacionDeposito());
+
+        itemCatalogoRepository.findAll().stream()
+                .filter(ic -> ic.getProducto().getIdentificador().equals(det.getProductoId()))
+                .findFirst()
+                .ifPresent(ic -> {
+                    r.setPrecioBase(ic.getPrecioBase());
+                    r.setComision(ic.getComision());
+                    String subastaName = ic.getCatalogo().getSubasta() != null
+                            ? "Subasta #" + ic.getCatalogo().getSubasta().getIdentificador() : null;
+                    r.setSubastaAsignada(subastaName);
+                });
+
+        if (det.getProducto() != null && det.getProducto().getSeguroNroPoliza() != null) {
+            r.setPolizaId(det.getProductoId());
+        }
+        return r;
+    }
+
+    private BienDetalle toBienDetalle(ProductoDetalle det) {
+        BienDetalle d = new BienDetalle();
+        BienResumen base = toBienResumen(det);
+        d.setId(base.getId()); d.setNombre(base.getNombre()); d.setEstado(base.getEstado());
+        d.setSubastaAsignada(base.getSubastaAsignada()); d.setPrecioBase(base.getPrecioBase());
+        d.setComision(base.getComision()); d.setMotivoRechazo(base.getMotivoRechazo());
+        d.setUbicacionDeposito(base.getUbicacionDeposito()); d.setPolizaId(base.getPolizaId());
+        d.setDescripcionTecnica(det.getProducto() != null ? det.getProducto().getDescripcionCompleta() : null);
+        d.setCantidadElementos(det.getCantidadElementos());
+        d.setInformacionAdicional(det.getInformacionAdicional());
+        int fotos = det.getProducto() != null
+                ? (int) itemCatalogoRepository.findAll().stream()
+                    .filter(ic -> ic.getProducto().getIdentificador().equals(det.getProductoId())).count()
+                : 0;
+        d.setFotosCargadas(fotos);
+        d.setDocumentacionAdjunta(false);
+        return d;
+    }
+
+    private BienSolicitudResponse toResponse(BienSolicitud sol) {
+        BienSolicitudResponse r = new BienSolicitudResponse();
+        r.setCodigoSolicitud(sol.getCodigoSolicitud());
+        r.setTipo(sol.getTipo());
+        r.setEstado(sol.getEstado());
+        r.setPasoActual(sol.getPasoActual());
+        r.setDatosCompletos(sol.getNombre() != null);
+        int fotosCount = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(sol.getId(), "foto");
+        r.setFotosCargadas(fotosCount);
+        r.setMinimoFotosRequeridas(MIN_FOTOS);
+        r.setDeclaracionPropiedadAceptada(sol.isDeclaraPropiedad());
+        int docsCount = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(sol.getId(), "documento");
+        r.setDocumentacionAdjunta(docsCount > 0);
+        r.setPuedeConfirmar(r.isDatosCompletos() && fotosCount >= MIN_FOTOS && sol.isDeclaraPropiedad());
+
+        if (sol.getNombre() != null) {
+            BienSolicitudResponse.BienDatosResumen bien = new BienSolicitudResponse.BienDatosResumen();
+            bien.setNombre(sol.getNombre());
+            bien.setDescripcionTecnica(sol.getDescripcionTecnica());
+            bien.setCantidadElementos(sol.getCantidadElementos());
+            bien.setEpocaOrigen(sol.getEpocaOrigen());
+            bien.setArtistaDisenador(sol.getArtistaDisenador());
+            bien.setFechaCreacion(sol.getFechaCreacionObra() != null ? sol.getFechaCreacionObra().toString() : null);
+            bien.setDatosHistoricos(sol.getDatosHistoricos());
+            bien.setInformacionAdicional(sol.getInformacionAdicional());
+            r.setBien(bien);
+        }
+
+        List<BienArchivoResumen> fotos = bienSolicitudArchivoRepository
+                .findBySolicitudIdAndTipoArchivo(sol.getId(), "foto")
+                .stream().map(this::toArchivoResumen).collect(Collectors.toList());
+        r.setFotos(fotos);
+
+        List<BienArchivoResumen> docs = bienSolicitudArchivoRepository
+                .findBySolicitudIdAndTipoArchivo(sol.getId(), "documento")
+                .stream().map(this::toArchivoResumen).collect(Collectors.toList());
+        r.setDocumentos(docs);
+        return r;
+    }
+
+    private BienArchivoResumen toArchivoResumen(BienSolicitudArchivo a) {
+        BienArchivoResumen r = new BienArchivoResumen();
+        r.setCodigoArchivo(a.getCodigoArchivo());
+        r.setNombreArchivo(a.getNombreArchivo());
+        r.setTipoArchivo(a.getTipoArchivo());
+        return r;
+    }
+
+    private BienSolicitud getSolicitudDelCliente(String email, String codigo) {
+        Integer clienteId = getClienteId(email);
+        BienSolicitud sol = bienSolicitudRepository.findByCodigoSolicitud(codigo)
+                .orElseThrow(() -> new ResourceNotFoundException("Solicitud no encontrada"));
+        if (!sol.getCliente().getIdentificador().equals(clienteId)) {
+            throw new ForbiddenException("La solicitud no pertenece al usuario");
+        }
+        return sol;
+    }
+
+    private Integer getClienteId(String email) {
+        return credencialRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"))
+                .getPersonaId();
+    }
+
+    private void validarTipo(String tipo) {
+        if (!List.of("obra_arte", "objeto_disenador", "otro").contains(tipo)) {
+            throw new BadRequestException("Tipo inválido: " + tipo);
+        }
+    }
+
+    private String generarCodigo() {
+        return "SOL-BIEN-" + LocalDate.now().getYear() + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+    }
+}
