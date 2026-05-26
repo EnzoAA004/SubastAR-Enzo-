@@ -109,6 +109,7 @@ public class CompraService {
         d.setSubasta(base.getSubasta()); d.setFecha(base.getFecha());
         d.setValorPujado(base.getValorPujado()); d.setMulta(base.getMulta());
         d.setEstadoPago(base.getEstadoPago()); d.setEstadoEntrega(base.getEstadoEntrega());
+        d.setPolizaId(r.getProducto().getSeguroNroPoliza());
 
         if (extra != null) {
             if (extra.getMedioPagoId() != null) {
