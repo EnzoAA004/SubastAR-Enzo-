@@ -51,6 +51,15 @@ public class BienController {
         return ResponseEntity.ok(bienService.cargarFotos(user.getUsername(), codigo, fotos));
     }
 
+    @PostMapping(value = "/solicitudes/{codigo}/fotos", consumes = "application/json")
+    public ResponseEntity<BienSolicitudResponse> cargarFotosCloudinary(
+            @PathVariable String codigo,
+            @Valid @RequestBody CloudinaryFotoRequest req,
+            @AuthenticationPrincipal UserDetails user) {
+        log.info("Recibiendo peticion de registrar fotos de Cloudinary para solicitud {} por usuario {}", codigo, user.getUsername());
+        return ResponseEntity.ok(bienService.cargarFotosCloudinary(user.getUsername(), codigo, req));
+    }
+
     @DeleteMapping("/solicitudes/{codigo}/fotos/{codigoFoto}")
     public ResponseEntity<Void> eliminarFoto(
             @PathVariable String codigo,
@@ -100,6 +109,14 @@ public class BienController {
             @PathVariable Integer id,
             @AuthenticationPrincipal UserDetails user) {
         return ResponseEntity.ok(bienService.getMiBien(user.getUsername(), id));
+    }
+
+    @PatchMapping("/mis-bienes/{id}")
+    public ResponseEntity<BienDetalle> actualizarMiBien(
+            @PathVariable Integer id,
+            @Valid @RequestBody ActualizarBienRequest req,
+            @AuthenticationPrincipal UserDetails user) {
+        return ResponseEntity.ok(bienService.actualizarMiBien(user.getUsername(), id, req));
     }
 
     @PostMapping("/mis-bienes/{id}/aceptar-condiciones")

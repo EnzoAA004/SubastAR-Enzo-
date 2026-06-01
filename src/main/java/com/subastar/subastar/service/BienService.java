@@ -7,6 +7,7 @@ import com.subastar.subastar.exception.ResourceNotFoundException;
 import com.subastar.subastar.model.*;
 import com.subastar.subastar.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -40,6 +42,10 @@ public class BienService {
     private static final Logger log = LoggerFactory.getLogger(BienService.class);
 
     private final CloudinaryService cloudinaryService;
+
+    @Value("${cloudinary.cloud-name:}")
+    private String cloudinaryCloudName;
+
     public BienSolicitudResponse iniciarSolicitud(String email, CrearBienSolicitudRequest req) {
         validarTipo(req.getTipo());
         Integer clienteId = getClienteId(email);
@@ -117,6 +123,39 @@ public class BienService {
             }
             bienSolicitudArchivoRepository.save(arch);
             log.debug("Foto guardada (codigo {}) para solicitud {}", arch.getCodigoArchivo(), codigoSolicitud);
+        }
+
+        int totalFotos = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(sol.getId(), "foto");
+        if (totalFotos >= MIN_FOTOS) {
+            sol.setEstado("fotos_cargadas");
+            sol.setPasoActual("documentos");
+            bienSolicitudRepository.save(sol);
+        }
+        return toResponse(sol);
+    }
+
+    @Transactional
+    public BienSolicitudResponse cargarFotosCloudinary(String email, String codigoSolicitud, CloudinaryFotoRequest req) {
+        BienSolicitud sol = getSolicitudDelCliente(email, codigoSolicitud);
+
+        if (req == null || req.getFotos() == null || req.getFotos().isEmpty()) {
+            throw new BadRequestException("Se debe enviar al menos una foto");
+        }
+
+        for (CloudinaryFotoRequest.CloudinaryFotoItem foto : req.getFotos()) {
+            if (foto == null || foto.getPublicId() == null || foto.getPublicId().isBlank()) {
+                throw new BadRequestException("public_id es requerido para cada foto");
+            }
+
+            BienSolicitudArchivo arch = new BienSolicitudArchivo();
+            arch.setCodigoArchivo("FOTO-" + UUID.randomUUID());
+            arch.setSolicitud(sol);
+            arch.setNombreArchivo(foto.getOriginalFilename() != null && !foto.getOriginalFilename().isBlank()
+                    ? foto.getOriginalFilename() : foto.getPublicId());
+            arch.setTipoArchivo("foto");
+            arch.setDatos(null);
+            arch.setUrl(foto.getPublicId());
+            bienSolicitudArchivoRepository.save(arch);
         }
 
         int totalFotos = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(sol.getId(), "foto");
@@ -261,6 +300,33 @@ public class BienService {
     }
 
     @Transactional
+    public BienDetalle actualizarMiBien(String email, Integer productoId, ActualizarBienRequest req) {
+        Integer clienteId = getClienteId(email);
+        ProductoDetalle det = productoDetalleRepository.findById(productoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Bien no encontrado"));
+        if (!clienteId.equals(det.getClienteId())) {
+            throw new ForbiddenException("El bien no pertenece al usuario");
+        }
+
+        boolean yaSubastado = itemCatalogoRepository.findAll().stream()
+                .anyMatch(ic -> ic.getProducto().getIdentificador().equals(productoId)
+                        && "si".equalsIgnoreCase(ic.getSubastado()));
+        if (yaSubastado) {
+            throw new BadRequestException("No se puede modificar un bien ya subastado");
+        }
+
+        if (req.getInformacionAdicional() != null) {
+            det.setInformacionAdicional(req.getInformacionAdicional());
+        }
+        if (req.getPrecioBaseSugerido() != null) {
+            det.setPrecioBaseSugerido(req.getPrecioBaseSugerido());
+        }
+
+        productoDetalleRepository.save(det);
+        return toBienDetalle(det);
+    }
+
+    @Transactional
     public void aceptarCondiciones(String email, Integer productoId, boolean acepta) {
         Integer clienteId = getClienteId(email);
         ProductoDetalle det = productoDetalleRepository.findById(productoId)
@@ -308,18 +374,74 @@ public class BienService {
         d.setDescripcionTecnica(det.getProducto() != null ? det.getProducto().getDescripcionCompleta() : null);
         d.setCantidadElementos(det.getCantidadElementos());
         d.setInformacionAdicional(det.getInformacionAdicional());
+        d.setPrecioBaseSugerido(det.getPrecioBaseSugerido());
         int fotos = 0;
         boolean documentacionAdjunta = false;
+        List<BienFotoResponse> fotosResponse = new ArrayList<>();
+        List<BienDocumentoResponse> documentosResponse = new ArrayList<>();
         var solicitudOpt = bienSolicitudRepository.findByProductoId(det.getProductoId());
         if (solicitudOpt.isPresent()) {
             BienSolicitud solicitud = solicitudOpt.get();
             fotos = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(solicitud.getId(), "foto");
             int documentos = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(solicitud.getId(), "documento");
             documentacionAdjunta = documentos > 0;
+            fotosResponse = bienSolicitudArchivoRepository
+                    .findBySolicitudIdAndTipoArchivo(solicitud.getId(), "foto")
+                    .stream()
+                    .map(archivo -> {
+                        BienFotoResponse foto = new BienFotoResponse();
+                        foto.setCodigoFoto(archivo.getCodigoArchivo());
+                        foto.setNombreArchivo(archivo.getNombreArchivo());
+                        foto.setPublicId(archivo.getUrl());
+                        foto.setUrl(buildCloudinaryImageUrl(archivo.getUrl()));
+                        foto.setTipo(archivo.getTipoArchivo());
+                        return foto;
+                    })
+                    .toList();
+            documentosResponse = bienSolicitudArchivoRepository
+                    .findBySolicitudIdAndTipoArchivo(solicitud.getId(), "documento")
+                    .stream()
+                    .map(archivo -> {
+                        BienDocumentoResponse documento = new BienDocumentoResponse();
+                        documento.setCodigoDocumento(archivo.getCodigoArchivo());
+                        documento.setNombreArchivo(archivo.getNombreArchivo());
+                        documento.setUrl(archivo.getUrl());
+                        documento.setTipo(archivo.getTipoArchivo());
+                        documento.setContentType(resolveContentType(archivo.getNombreArchivo()));
+                        return documento;
+                    })
+                    .toList();
         }
         d.setFotosCargadas(fotos);
         d.setDocumentacionAdjunta(documentacionAdjunta);
+        d.setFotos(fotosResponse);
+        d.setDocumentos(documentosResponse);
         return d;
+    }
+
+    private String buildCloudinaryImageUrl(String storedValue) {
+        if (storedValue == null || storedValue.isBlank()) {
+            return null;
+        }
+        if (storedValue.startsWith("http://") || storedValue.startsWith("https://")) {
+            return storedValue;
+        }
+        if (cloudinaryCloudName == null || cloudinaryCloudName.isBlank()) {
+            return null;
+        }
+        return "https://res.cloudinary.com/"
+                + cloudinaryCloudName
+                + "/image/upload/f_auto,q_auto/"
+                + storedValue;
+    }
+
+    private String resolveContentType(String filename) {
+        if (filename == null) return "application/octet-stream";
+        String lower = filename.toLowerCase();
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        return "application/octet-stream";
     }
 
     private BienSolicitudResponse toResponse(BienSolicitud sol) {

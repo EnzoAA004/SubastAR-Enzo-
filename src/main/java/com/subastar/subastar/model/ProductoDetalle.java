@@ -2,6 +2,7 @@ package com.subastar.subastar.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 @Data
@@ -38,6 +39,9 @@ public class ProductoDetalle {
 
     @Column(name = "informacion_adicional")
     private String informacionAdicional;
+
+    @Column(name = "precio_base_sugerido", precision = 18, scale = 2)
+    private BigDecimal precioBaseSugerido;
 
     @Column(name = "estado_solicitud", nullable = false)
     private String estadoSolicitud;
