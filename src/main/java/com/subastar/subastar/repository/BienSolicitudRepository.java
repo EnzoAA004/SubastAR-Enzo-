@@ -8,5 +8,6 @@ import java.util.Optional;
 
 public interface BienSolicitudRepository extends JpaRepository<BienSolicitud, Integer> {
     Optional<BienSolicitud> findByCodigoSolicitud(String codigo);
+    Optional<BienSolicitud> findByProductoId(Integer productoId);
     List<BienSolicitud> findByClienteIdentificador(Integer clienteId);
 }

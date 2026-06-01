@@ -308,12 +308,17 @@ public class BienService {
         d.setDescripcionTecnica(det.getProducto() != null ? det.getProducto().getDescripcionCompleta() : null);
         d.setCantidadElementos(det.getCantidadElementos());
         d.setInformacionAdicional(det.getInformacionAdicional());
-        int fotos = det.getProducto() != null
-                ? (int) itemCatalogoRepository.findAll().stream()
-                    .filter(ic -> ic.getProducto().getIdentificador().equals(det.getProductoId())).count()
-                : 0;
+        int fotos = 0;
+        boolean documentacionAdjunta = false;
+        var solicitudOpt = bienSolicitudRepository.findByProductoId(det.getProductoId());
+        if (solicitudOpt.isPresent()) {
+            BienSolicitud solicitud = solicitudOpt.get();
+            fotos = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(solicitud.getId(), "foto");
+            int documentos = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(solicitud.getId(), "documento");
+            documentacionAdjunta = documentos > 0;
+        }
         d.setFotosCargadas(fotos);
-        d.setDocumentacionAdjunta(false);
+        d.setDocumentacionAdjunta(documentacionAdjunta);
         return d;
     }
 
