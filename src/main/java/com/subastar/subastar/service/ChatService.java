@@ -2,6 +2,8 @@ package com.subastar.subastar.service;
 
 import com.subastar.subastar.dto.chat.ConversacionResumen;
 import com.subastar.subastar.dto.chat.MensajeChatResponse;
+import com.subastar.subastar.dto.chat.EnviarMensajeRequest;
+import com.subastar.subastar.exception.BadRequestException;
 import com.subastar.subastar.exception.ResourceNotFoundException;
 import com.subastar.subastar.model.ChatMensaje;
 import com.subastar.subastar.model.Cliente;
@@ -87,6 +89,21 @@ public class ChatService {
         }
 
         return mensajes.stream().map(this::toResponse).collect(Collectors.toList());
+    }
+
+    public MensajeChatResponse enviarMensaje(String email, String tipo, EnviarMensajeRequest req) {
+        if (!List.of("soporte", "bot", "poliza").contains(tipo)) {
+            throw new BadRequestException("Tipo de conversacion invalido");
+        }
+        Cliente cliente = clienteRepository.findById(getClienteId(email))
+                .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado"));
+        ChatMensaje mensaje = new ChatMensaje();
+        mensaje.setCliente(cliente);
+        mensaje.setTipo(tipo);
+        mensaje.setEmisor("cliente");
+        mensaje.setContenido(req.getContenido().trim());
+        mensaje.setLeido(true);
+        return toResponse(chatMensajeRepository.save(mensaje));
     }
 
     private MensajeChatResponse toResponse(ChatMensaje m) {

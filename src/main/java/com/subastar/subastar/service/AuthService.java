@@ -79,7 +79,7 @@ public class AuthService {
     }
 
     @Transactional
-    public void verificarCodigo(VerificarCodigoRequest req) {
+    public String verificarCodigo(VerificarCodigoRequest req) {
         RegistroPendiente registro = registroPendienteRepository
                 .findByEmailAndEstado(req.getEmail(), "aprobado")
                 .orElseThrow(() -> new ResourceNotFoundException("Email no encontrado en el sistema"));
@@ -95,6 +95,7 @@ public class AuthService {
         registro.setTokenVerificacion(token);
         registro.setTokenExpiresAt(LocalDateTime.now().plusHours(2));
         registroPendienteRepository.save(registro);
+        return token;
     }
 
     @Transactional

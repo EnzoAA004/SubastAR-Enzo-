@@ -8,6 +8,8 @@ import com.subastar.subastar.model.*;
 import com.subastar.subastar.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -35,6 +37,9 @@ public class BienService {
 
     private static final int MIN_FOTOS = 6;
 
+    private static final Logger log = LoggerFactory.getLogger(BienService.class);
+
+    private final CloudinaryService cloudinaryService;
     public BienSolicitudResponse iniciarSolicitud(String email, CrearBienSolicitudRequest req) {
         validarTipo(req.getTipo());
         Integer clienteId = getClienteId(email);
@@ -87,6 +92,8 @@ public class BienService {
 
         if (fotos == null || fotos.isEmpty()) throw new BadRequestException("Se debe enviar al menos una foto");
 
+        log.info("Cargando {} fotos para solicitud {} por usuario {}", fotos.size(), codigoSolicitud, email);
+
         for (MultipartFile f : fotos) {
             BienSolicitudArchivo arch = new BienSolicitudArchivo();
             arch.setCodigoArchivo("FOTO-" + UUID.randomUUID());
@@ -94,11 +101,22 @@ public class BienService {
             arch.setNombreArchivo(f.getOriginalFilename() != null ? f.getOriginalFilename() : "foto.jpg");
             arch.setTipoArchivo("foto");
             try {
-                arch.setDatos(f.getBytes());
+                byte[] data = f.getBytes();
+                // intentar subir a Cloudinary; si falla o no está configurado, se guardan los bytes
+                String url = cloudinaryService.upload(data, arch.getCodigoArchivo());
+                if (url != null) {
+                    arch.setUrl(url);
+                    // opcional: no almacenar datos para reducir tamaño en DB
+                    arch.setDatos(null);
+                } else {
+                    arch.setDatos(data);
+                }
             } catch (IOException e) {
+                log.error("Error al procesar la foto: {}", f.getOriginalFilename(), e);
                 throw new BadRequestException("Error al procesar la foto: " + f.getOriginalFilename());
             }
             bienSolicitudArchivoRepository.save(arch);
+            log.debug("Foto guardada (codigo {}) para solicitud {}", arch.getCodigoArchivo(), codigoSolicitud);
         }
 
         int totalFotos = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(sol.getId(), "foto");
@@ -137,7 +155,14 @@ public class BienService {
                 arch.setNombreArchivo(f.getOriginalFilename() != null ? f.getOriginalFilename() : "doc.pdf");
                 arch.setTipoArchivo("documento");
                 try {
-                    arch.setDatos(f.getBytes());
+                    byte[] data = f.getBytes();
+                    String url = cloudinaryService.upload(data, arch.getCodigoArchivo());
+                    if (url != null) {
+                        arch.setUrl(url);
+                        arch.setDatos(null);
+                    } else {
+                        arch.setDatos(data);
+                    }
                 } catch (IOException e) {
                     throw new BadRequestException("Error al procesar el documento: " + f.getOriginalFilename());
                 }
@@ -337,6 +362,7 @@ public class BienService {
         r.setCodigoArchivo(a.getCodigoArchivo());
         r.setNombreArchivo(a.getNombreArchivo());
         r.setTipoArchivo(a.getTipoArchivo());
+        r.setUrlTemporal(a.getUrl());
         return r;
     }
 

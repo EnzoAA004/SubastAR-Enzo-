@@ -30,6 +30,9 @@ public class BienSolicitudArchivo {
     @Column(name = "datos")
     private byte[] datos;
 
+    @Column(name = "url", nullable = true, length = 2048)
+    private String url;
+
     @Column(name = "creado_en", nullable = false)
     private LocalDateTime creadoEn;
 

@@ -10,6 +10,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -20,11 +22,13 @@ import java.util.Map;
 public class BienController {
 
     private final BienService bienService;
+    private static final Logger log = LoggerFactory.getLogger(BienController.class);
 
     @PostMapping("/solicitudes")
     public ResponseEntity<BienSolicitudResponse> iniciarSolicitud(
             @Valid @RequestBody CrearBienSolicitudRequest req,
             @AuthenticationPrincipal UserDetails user) {
+        log.info("Iniciando solicitud de bien para usuario {} tipo={}", user.getUsername(), req.getTipo());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(bienService.iniciarSolicitud(user.getUsername(), req));
     }
@@ -34,6 +38,7 @@ public class BienController {
             @PathVariable String codigo,
             @Valid @RequestBody BienDatosRequest req,
             @AuthenticationPrincipal UserDetails user) {
+        log.info("Cargando datos de solicitud {} por usuario {}", codigo, user.getUsername());
         return ResponseEntity.ok(bienService.cargarDatos(user.getUsername(), codigo, req));
     }
 
@@ -42,6 +47,7 @@ public class BienController {
             @PathVariable String codigo,
             @RequestPart("fotos") List<MultipartFile> fotos,
             @AuthenticationPrincipal UserDetails user) {
+        log.info("Recibiendo petición de cargar {} fotos para solicitud {} por usuario {}", fotos != null ? fotos.size() : 0, codigo, user.getUsername());
         return ResponseEntity.ok(bienService.cargarFotos(user.getUsername(), codigo, fotos));
     }
 
@@ -60,6 +66,7 @@ public class BienController {
             @RequestPart("declara_propiedad") String declaraPropiedad,
             @RequestPart(value = "documentos", required = false) List<MultipartFile> docs,
             @AuthenticationPrincipal UserDetails user) {
+        log.info("Recibiendo petición de cargar documentos para solicitud {} por usuario {}. Declara: {}", codigo, user.getUsername(), declaraPropiedad);
         CargarDocumentosBienRequest req = new CargarDocumentosBienRequest();
         req.setDeclaraPropiedad("true".equalsIgnoreCase(declaraPropiedad));
         return ResponseEntity.ok(bienService.cargarDocumentos(user.getUsername(), codigo, req, docs));

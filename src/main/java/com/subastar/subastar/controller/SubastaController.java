@@ -71,4 +71,12 @@ public class SubastaController {
             @PathVariable("item_id") Integer itemId) {
         return ResponseEntity.ok(pujaService.getHistorialPujas(id, itemId));
     }
+
+    @GetMapping("/{id}/resultado/{item_id}")
+    public ResponseEntity<ResultadoPujaResponse> getResultado(
+            @PathVariable Integer id,
+            @PathVariable("item_id") Integer itemId,
+            @AuthenticationPrincipal UserDetails user) {
+        return ResponseEntity.ok(subastaService.getResultado(id, itemId, user.getUsername()));
+    }
 }
