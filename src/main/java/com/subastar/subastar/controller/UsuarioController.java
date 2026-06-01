@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/usuarios")
@@ -64,12 +65,13 @@ public class UsuarioController {
             @RequestPart(value = "vencimiento", required = false) String vencimiento,
             @RequestPart(value = "codigo_seguridad", required = false) String codigoSeguridad,
             @RequestPart(value = "dni_titular", required = false) String dniTitular,
+            @RequestPart(value = "es_internacional", required = false) String esInternacional,
             @RequestPart(value = "banco_emisor", required = false) String bancoEmisor,
             @RequestPart(value = "monto_certificado", required = false) String montoCertificado,
             @RequestPart(value = "numero_cheque", required = false) String numeroCheque,
             @RequestPart(value = "foto_cheque", required = false) MultipartFile fotoCheque) {
 
-        MedioPagoResumen result = switch (tipo) {
+        MedioPagoResumen result = switch (tipo.trim()) {
             case "cuenta_bancaria" -> {
                 CuentaBancariaRequest req = new CuentaBancariaRequest();
                 req.setNombreBanco(nombreBanco);
@@ -86,6 +88,7 @@ public class UsuarioController {
                 req.setVencimiento(vencimiento);
                 req.setCodigoSeguridad(codigoSeguridad);
                 req.setDniTitular(dniTitular);
+                req.setEsInternacional("true".equalsIgnoreCase(esInternacional));
                 yield medioPagoService.agregarTarjeta(user.getUsername(), req);
             }
             case "cheque_certificado" -> {
@@ -104,9 +107,9 @@ public class UsuarioController {
     }
 
     @DeleteMapping("/me/medios-pago/{id}")
-    public ResponseEntity<Void> eliminarMedioPago(@AuthenticationPrincipal UserDetails user,
-            @PathVariable Integer id) {
+    public ResponseEntity<Map<String, String>> eliminarMedioPago(@AuthenticationPrincipal UserDetails user,
+                                                                 @PathVariable Integer id) {
         medioPagoService.eliminar(user.getUsername(), id);
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(Map.of("message", "Medio de pago eliminado correctamente."));
     }
 }

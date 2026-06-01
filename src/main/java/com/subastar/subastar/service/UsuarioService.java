@@ -79,6 +79,7 @@ public class UsuarioService {
             mensaje = "Tenés una multa pendiente de pago de $" + multaPendiente;
         } else {
             estado = "activo";
+            mensaje = "Tu cuenta está activa y al día.";
         }
         return new EstadoCuentaResponse(estado, multaPendiente, mensaje);
     }

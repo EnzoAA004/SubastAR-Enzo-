@@ -45,7 +45,8 @@ public class AuthController {
         String token = authService.verificarCodigo(req);
         return ResponseEntity.ok(Map.of(
                 "message", "Código verificado correctamente. Podés crear tu contraseña.",
-                "token_verificacion", token));
+                "tokenVerificacion", token
+        ));
     }
 
     @PostMapping("/completar-registro")
@@ -59,8 +60,8 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+    public ResponseEntity<Map<String, String>> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
         authService.logout(authHeader);
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(Map.of("message", "Sesión cerrada correctamente."));
     }
 }

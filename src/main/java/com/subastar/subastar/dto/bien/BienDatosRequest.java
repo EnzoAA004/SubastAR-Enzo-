@@ -37,4 +37,13 @@ public class BienDatosRequest {
 
     @JsonProperty("informacion_adicional")
     private String informacionAdicional;
+
+    @JsonProperty("cuenta_cobro_banco")
+    private String cuentaCobroBanco;
+
+    @JsonProperty("cuenta_cobro_pais")
+    private String cuentaCobroPais;
+
+    @JsonProperty("cuenta_cobro_cbu_iban")
+    private String cuentaCobroCbuIban;
 }

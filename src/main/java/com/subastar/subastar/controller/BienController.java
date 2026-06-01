@@ -61,12 +61,12 @@ public class BienController {
     }
 
     @DeleteMapping("/solicitudes/{codigo}/fotos/{codigoFoto}")
-    public ResponseEntity<Void> eliminarFoto(
+    public ResponseEntity<Map<String, String>> eliminarFoto(
             @PathVariable String codigo,
             @PathVariable String codigoFoto,
             @AuthenticationPrincipal UserDetails user) {
         bienService.eliminarFoto(user.getUsername(), codigo, codigoFoto);
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(Map.of("message", "Foto eliminada correctamente."));
     }
 
     @PostMapping(value = "/solicitudes/{codigo}/documentos", consumes = "multipart/form-data")
@@ -82,12 +82,12 @@ public class BienController {
     }
 
     @DeleteMapping("/solicitudes/{codigo}/documentos/{codigoDoc}")
-    public ResponseEntity<Void> eliminarDocumento(
+    public ResponseEntity<Map<String, String>> eliminarDocumento(
             @PathVariable String codigo,
             @PathVariable String codigoDoc,
             @AuthenticationPrincipal UserDetails user) {
         bienService.eliminarDocumento(user.getUsername(), codigo, codigoDoc);
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(Map.of("message", "Documento eliminado correctamente."));
     }
 
     @PostMapping("/solicitudes/{codigo}/confirmar")

@@ -43,6 +43,9 @@ public class ProductoDetalle {
     @Column(name = "precio_base_sugerido", precision = 18, scale = 2)
     private BigDecimal precioBaseSugerido;
 
+    @Column(name = "divisa_precio_base_sugerido")
+    private String divisaPrecioBaseSugerido;
+
     @Column(name = "estado_solicitud", nullable = false)
     private String estadoSolicitud;
 

@@ -14,4 +14,7 @@ public interface AsistenteRepository extends JpaRepository<Asistente, Integer> {
 
     @Query("SELECT COALESCE(MAX(a.numeroPostor), 0) FROM Asistente a WHERE a.subasta.identificador = :subastaId")
     int findMaxNumeroPostorBySubastaId(@Param("subastaId") Integer subastaId);
+
+    @Query("SELECT COUNT(a) > 0 FROM Asistente a WHERE a.cliente.identificador = :clienteId AND a.subasta.estado = 'abierta' AND a.subasta.identificador <> :subastaId")
+    boolean existsEnOtraSubastaAbierta(@Param("clienteId") Integer clienteId, @Param("subastaId") Integer subastaId);
 }

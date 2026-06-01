@@ -34,6 +34,7 @@ public class BienService {
     private final ClienteRepository clienteRepository;
     private final ItemCatalogoRepository itemCatalogoRepository;
     private final CatalogoRepository catalogoRepository;
+    private final NotificacionService notificacionService;
     private final EmpleadoRepository empleadoRepository;
     private final DuenioRepository duenioRepository;
 
@@ -86,6 +87,9 @@ public class BienService {
         sol.setFechaCreacionObra(req.getFechaCreacion());
         sol.setDatosHistoricos(req.getDatosHistoricos());
         sol.setInformacionAdicional(req.getInformacionAdicional());
+        sol.setCuentaCobroBanco(req.getCuentaCobroBanco());
+        sol.setCuentaCobroPais(req.getCuentaCobroPais());
+        sol.setCuentaCobroCbuIban(req.getCuentaCobroCbuIban());
         sol.setEstado("datos_cargados");
         sol.setPasoActual("fotos");
         bienSolicitudRepository.save(sol);
@@ -102,7 +106,7 @@ public class BienService {
 
         for (MultipartFile f : fotos) {
             BienSolicitudArchivo arch = new BienSolicitudArchivo();
-            arch.setCodigoArchivo("FOTO-" + UUID.randomUUID());
+            arch.setCodigoArchivo("FOTO-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
             arch.setSolicitud(sol);
             arch.setNombreArchivo(f.getOriginalFilename() != null ? f.getOriginalFilename() : "foto.jpg");
             arch.setTipoArchivo("foto");
@@ -189,7 +193,7 @@ public class BienService {
             for (MultipartFile f : docs) {
                 if (f == null || f.isEmpty()) continue;
                 BienSolicitudArchivo arch = new BienSolicitudArchivo();
-                arch.setCodigoArchivo("DOC-" + UUID.randomUUID());
+                arch.setCodigoArchivo("DOC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
                 arch.setSolicitud(sol);
                 arch.setNombreArchivo(f.getOriginalFilename() != null ? f.getOriginalFilename() : "doc.pdf");
                 arch.setTipoArchivo("documento");
@@ -212,6 +216,9 @@ public class BienService {
         sol.setEstado("documentos_cargados");
         sol.setPasoActual("confirmar");
         bienSolicitudRepository.save(sol);
+
+        notificacionService.notificarBienConfirmado(sol.getCliente(), sol.getNombre());
+
         return toResponse(sol);
     }
 
@@ -321,6 +328,16 @@ public class BienService {
         if (req.getPrecioBaseSugerido() != null) {
             det.setPrecioBaseSugerido(req.getPrecioBaseSugerido());
         }
+        if (req.getDivisaPrecioBaseSugerido() != null) {
+            String divisa = req.getDivisaPrecioBaseSugerido().trim().toUpperCase();
+            if (!divisa.equals("ARS") && !divisa.equals("USD")) {
+                throw new BadRequestException("La divisa del precio base sugerido debe ser ARS o USD");
+            }
+            det.setDivisaPrecioBaseSugerido(divisa);
+        }
+        if (req.getPrecioBaseSugerido() != null && det.getDivisaPrecioBaseSugerido() == null) {
+            det.setDivisaPrecioBaseSugerido("ARS");
+        }
 
         productoDetalleRepository.save(det);
         return toBienDetalle(det);
@@ -335,6 +352,17 @@ public class BienService {
         if (!acepta) {
             det.setEstadoSolicitud("rechazado");
             det.setMotivoRechazo("El usuario rechazó las condiciones propuestas");
+
+            Cliente cliente = clienteRepository.findById(clienteId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado"));
+
+            java.math.BigDecimal costoDev = itemCatalogoRepository.findAll().stream()
+                    .filter(ic -> ic.getProducto().getIdentificador().equals(productoId))
+                    .findFirst()
+                    .map(ic -> ic.getPrecioBase().multiply(java.math.BigDecimal.valueOf(0.10)))
+                    .orElse(java.math.BigDecimal.ZERO);
+
+            notificacionService.notificarDevolucion(cliente, det.getNombre(), costoDev);
         }
         productoDetalleRepository.save(det);
     }
@@ -375,6 +403,9 @@ public class BienService {
         d.setCantidadElementos(det.getCantidadElementos());
         d.setInformacionAdicional(det.getInformacionAdicional());
         d.setPrecioBaseSugerido(det.getPrecioBaseSugerido());
+        d.setDivisaPrecioBaseSugerido(det.getDivisaPrecioBaseSugerido() != null
+                ? det.getDivisaPrecioBaseSugerido()
+                : det.getPrecioBaseSugerido() != null ? "ARS" : null);
         int fotos = 0;
         boolean documentacionAdjunta = false;
         List<BienFotoResponse> fotosResponse = new ArrayList<>();
@@ -454,6 +485,7 @@ public class BienService {
         int fotosCount = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(sol.getId(), "foto");
         r.setFotosCargadas(fotosCount);
         r.setMinimoFotosRequeridas(MIN_FOTOS);
+        r.setMaximoFotosPermitidas(null);
         r.setDeclaracionPropiedadAceptada(sol.isDeclaraPropiedad());
         int docsCount = bienSolicitudArchivoRepository.countBySolicitudIdAndTipoArchivo(sol.getId(), "documento");
         r.setDocumentacionAdjunta(docsCount > 0);

@@ -24,6 +24,7 @@ public class NotificacionService {
                 + "Importe ofertado: $" + importePujado + "\n"
                 + "Comisión: $" + totalComision + "\n"
                 + "Total a pagar: $" + total + "\n"
+                + "El costo de envío a tu dirección declarada se calculará al momento de procesar la entrega.\n"
                 + "Podés regularizar tu pago desde 'Mis compras'.";
         enviar(cliente, "compra", contenido);
     }
@@ -31,7 +32,28 @@ public class NotificacionService {
     public void notificarPagoRegularizado(Cliente cliente, String nombreItem, BigDecimal total) {
         String contenido = "Tu pago por el ítem \"" + nombreItem + "\" fue registrado correctamente.\n"
                 + "Total abonado: $" + total;
-        enviar(cliente, "compra", contenido);
+        enviar(cliente, "bot", contenido);
+    }
+
+    public void notificarPujaRegistrada(Cliente cliente, String nombreItem, BigDecimal monto) {
+        String contenido = "Tu puja de $" + monto + " por el ítem \"" + nombreItem + "\" fue registrada exitosamente.";
+        enviar(cliente, "bot", contenido);
+    }
+
+    public void notificarMedioPagoAgregado(Cliente cliente, String descripcion) {
+        String contenido = "Medio de pago agregado: " + descripcion + ".\nEstá pendiente de verificación por la empresa.";
+        enviar(cliente, "bot", contenido);
+    }
+
+    public void notificarMedioPagoEliminado(Cliente cliente, String descripcion) {
+        String contenido = "Medio de pago eliminado: " + descripcion + ".";
+        enviar(cliente, "bot", contenido);
+    }
+
+    public void notificarBienConfirmado(Cliente cliente, String nombreBien) {
+        String contenido = "Tu solicitud de consignación del bien \"" + nombreBien + "\" fue enviada para revisión.\n"
+                + "Te notificaremos cuando la empresa complete la inspección.";
+        enviar(cliente, "bot", contenido);
     }
 
     public void notificarMulta(Cliente cliente, BigDecimal monto, String motivo) {
@@ -39,6 +61,13 @@ public class NotificacionService {
                 + "Motivo: " + motivo + "\n"
                 + "Debés regularizarla antes de participar en otra subasta.";
         enviar(cliente, "multa", contenido);
+    }
+
+    public void notificarDevolucion(Cliente cliente, String nombreBien, BigDecimal costoDevolucion) {
+        String contenido = "Rechazaste las condiciones para el bien \"" + nombreBien + "\".\n"
+                + "El bien será devuelto a tu dirección con un costo de devolución de $" + costoDevolucion + ".\n"
+                + "Deberás abonar este monto para recibir tu bien.";
+        enviar(cliente, "bien", contenido);
     }
 
     public void notificarBienAceptado(Cliente cliente, String nombreBien, BigDecimal precioBase) {

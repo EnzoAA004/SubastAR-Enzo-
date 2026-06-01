@@ -24,4 +24,6 @@ public class BienDetalle extends BienResumen {
     private List<BienDocumentoResponse> documentos;
     @JsonProperty("precio_base_sugerido")
     private BigDecimal precioBaseSugerido;
+    @JsonProperty("divisa_precio_base_sugerido")
+    private String divisaPrecioBaseSugerido;
 }

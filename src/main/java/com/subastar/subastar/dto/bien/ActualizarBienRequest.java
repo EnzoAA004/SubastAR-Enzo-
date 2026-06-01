@@ -16,4 +16,7 @@ public class ActualizarBienRequest {
     @JsonProperty("precio_base_sugerido")
     @DecimalMin(value = "0.0", inclusive = false)
     private BigDecimal precioBaseSugerido;
+
+    @JsonProperty("divisa_precio_base_sugerido")
+    private String divisaPrecioBaseSugerido;
 }

@@ -60,6 +60,15 @@ public class BienSolicitud {
     @Column(name = "producto_id")
     private Integer productoId;
 
+    @Column(name = "cuenta_cobro_banco")
+    private String cuentaCobroBanco;
+
+    @Column(name = "cuenta_cobro_pais")
+    private String cuentaCobroPais;
+
+    @Column(name = "cuenta_cobro_cbu_iban")
+    private String cuentaCobroCbuIban;
+
     @Column(name = "creado_en", nullable = false)
     private LocalDateTime creadoEn;
 

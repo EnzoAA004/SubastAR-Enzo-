@@ -23,4 +23,7 @@ public class TarjetaCreditoRequest {
     @NotBlank
     @JsonProperty("dni_titular")
     private String dniTitular;
+
+    @JsonProperty("es_internacional")
+    private boolean esInternacional = false;
 }

@@ -117,6 +117,7 @@ CREATE TABLE productos_detalle (
     datos_historicos     NVARCHAR(MAX),
     informacion_adicional NVARCHAR(MAX),
     precio_base_sugerido DECIMAL(18,2),
+    divisa_precio_base_sugerido VARCHAR(10),
     estado_solicitud     VARCHAR(30) NOT NULL DEFAULT 'en_revision',  -- en_revision | aceptado | rechazado | vendido
     motivo_rechazo       NVARCHAR(MAX),
     ubicacion_deposito   VARCHAR(255),

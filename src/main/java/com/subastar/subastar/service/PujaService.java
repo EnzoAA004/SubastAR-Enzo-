@@ -32,6 +32,8 @@ public class PujaService {
     private final CredencialRepository credencialRepository;
     private final ClienteRepository clienteRepository;
     private final MultaRepository multaRepository;
+    private final TarjetaCreditoRepository tarjetaCreditoRepository;
+    private final NotificacionService notificacionService;
 
     @Transactional
     public PujaResumen pujar(Integer subastaId, PujaRequest req, String email) {
@@ -84,10 +86,24 @@ public class PujaService {
         }
 
         // M-9: validar compatibilidad de moneda entre subasta y medio de pago
-        if ("USD".equals(extra.getMoneda()) && "cheque_certificado".equals(medioPago.getTipo())) {
-            throw new ForbiddenException(
-                    "Los cheques certificados no son válidos para subastas en dólares. "
-                    + "Usá una cuenta bancaria o tarjeta de crédito internacional.");
+        if ("USD".equals(extra.getMoneda())) {
+            if ("cheque_certificado".equals(medioPago.getTipo())) {
+                throw new ForbiddenException("Los cheques certificados no son válidos para subastas en dólares.");
+            }
+            if ("cuenta_bancaria".equals(medioPago.getTipo())) {
+                cuentaBancariaRepository.findByMedioPagoId(medioPago.getId()).ifPresent(cb -> {
+                    if ("Argentina".equalsIgnoreCase(cb.getPaisBanco())) {
+                        throw new ForbiddenException("Para subastas en dólares necesitás una cuenta bancaria de un banco extranjero.");
+                    }
+                });
+            }
+            if ("tarjeta_credito".equals(medioPago.getTipo())) {
+                tarjetaCreditoRepository.findByMedioPagoId(medioPago.getId()).ifPresent(tc -> {
+                    if (!tc.isEsInternacional()) {
+                        throw new ForbiddenException("Para subastas en dólares necesitás una tarjeta de crédito internacional.");
+                    }
+                });
+            }
         }
 
         // A-11: validar que la puja no supere el límite del medio de pago
@@ -111,6 +127,11 @@ public class PujaService {
             if (req.getMonto().compareTo(maximo) > 0) {
                 throw new BadRequestException("El monto máximo es " + maximo);
             }
+        }
+
+        // Validar que no esté en otra subasta abierta
+        if (asistenteRepository.existsEnOtraSubastaAbierta(cliente.getIdentificador(), subastaId)) {
+            throw new com.subastar.subastar.exception.ForbiddenException("Ya estás conectado a otra subasta. No podés participar en más de una a la vez.");
         }
 
         // Obtener o crear asistente
@@ -137,6 +158,10 @@ public class PujaService {
         pe.setPujoId(pujo.getIdentificador());
         pe.setMedioPagoId(req.getMedioPagoId());
         pujoExtraRepository.save(pe);
+
+        String nombreItem = item.getProducto().getDescripcionCatalogo() != null
+                ? item.getProducto().getDescripcionCatalogo() : "Ítem #" + item.getIdentificador();
+        notificacionService.notificarPujaRegistrada(cliente, nombreItem, req.getMonto());
 
         return toPujaResumen(pujo, pe);
     }

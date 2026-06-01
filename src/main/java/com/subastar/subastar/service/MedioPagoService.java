@@ -28,6 +28,8 @@ public class MedioPagoService {
     private final ChequeCertificadoRepository chequeCertificadoRepository;
     private final CredencialRepository credencialRepository;
     private final ClienteRepository clienteRepository;
+    private final PujoRepository pujoRepository;
+    private final NotificacionService notificacionService;
 
     public List<MedioPagoResumen> listar(String email) {
         Integer clienteId = getClienteId(email);
@@ -65,6 +67,8 @@ public class MedioPagoService {
         cb.setFondosReservados(req.getFondosReservados());
         cuentaBancariaRepository.save(cb);
 
+        recalcularCategoria(clienteId);
+        notificacionService.notificarMedioPagoAgregado(cliente, mp.getDescripcion());
         return toResumen(mp);
     }
 
@@ -74,13 +78,14 @@ public class MedioPagoService {
         Cliente cliente = clienteRepository.findById(clienteId)
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado"));
 
-        String masked = "**** **** **** " + req.getNumeroTarjeta().substring(Math.max(0, req.getNumeroTarjeta().length() - 4));
+        String numeroTarjeta = req.getNumeroTarjeta().trim();
+        String masked = "**** **** **** " + numeroTarjeta.substring(Math.max(0, numeroTarjeta.length() - 4));
 
         MedioPago mp = new MedioPago();
         mp.setCliente(cliente);
         mp.setTipo("tarjeta_credito");
-        mp.setDescripcion("Tarjeta de crédito - " + req.getTitular() + " terminada en "
-                + req.getNumeroTarjeta().substring(Math.max(0, req.getNumeroTarjeta().length() - 4)));
+        mp.setDescripcion("Tarjeta de crédito - " + req.getTitular().trim() + " terminada en "
+                + numeroTarjeta.substring(Math.max(0, numeroTarjeta.length() - 4)));
         mp = medioPagoRepository.save(mp);
 
         TarjetaCredito tc = new TarjetaCredito();
@@ -88,8 +93,12 @@ public class MedioPagoService {
         tc.setNumeroTarjetaMasked(masked);
         tc.setTitular(req.getTitular());
         tc.setVencimiento(req.getVencimiento());
+        tc.setEsInternacional(req.isEsInternacional());
         tc.setDniTitular(req.getDniTitular());
         tarjetaCreditoRepository.save(tc);
+
+        recalcularCategoria(clienteId);
+        notificacionService.notificarMedioPagoAgregado(cliente, mp.getDescripcion());
 
         return toResumen(mp);
     }
@@ -112,7 +121,7 @@ public class MedioPagoService {
         MedioPago mp = new MedioPago();
         mp.setCliente(cliente);
         mp.setTipo("cheque_certificado");
-        mp.setDescripcion("Cheque certificado " + req.getBancoEmisor() + " - Nro. " + req.getNumeroCheque());
+        mp.setDescripcion("Cheque certificado " + req.getBancoEmisor().trim() + " - Nro. " + req.getNumeroCheque().trim());
         mp = medioPagoRepository.save(mp);
 
         ChequeCertificado ch = new ChequeCertificado();
@@ -121,11 +130,15 @@ public class MedioPagoService {
         ch.setMontoCertificado(req.getMontoCertificado());
         ch.setNumeroCheque(req.getNumeroCheque());
         try {
-            if (foto != null && !foto.isEmpty()) ch.setFotoCheque(foto.getBytes());
+            if (foto != null && !foto.isEmpty())
+                ch.setFotoCheque(foto.getBytes());
         } catch (IOException e) {
             throw new BadRequestException("Error al procesar la foto del cheque");
         }
         chequeCertificadoRepository.save(ch);
+
+        recalcularCategoria(clienteId);
+        notificacionService.notificarMedioPagoAgregado(cliente, mp.getDescripcion());
 
         return toResumen(mp);
     }
@@ -136,9 +149,48 @@ public class MedioPagoService {
         MedioPago mp = medioPagoRepository
                 .findByIdAndClienteIdentificadorAndEliminadoFalse(medioPagoId, clienteId)
                 .orElseThrow(() -> new ResourceNotFoundException("Medio de pago no encontrado"));
+        String descripcion = mp.getDescripcion();
+        Cliente cliente = clienteRepository.findById(clienteId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado"));
         mp.setEliminado(true);
         medioPagoRepository.save(mp);
+        recalcularCategoria(clienteId);
+        notificacionService.notificarMedioPagoEliminado(cliente, descripcion);
     }
+
+    public void recalcularCategoria(Integer clienteId) {
+        Cliente cliente = clienteRepository.findById(clienteId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado"));
+
+        List<String> tipos = medioPagoRepository.findByClienteIdentificadorAndEliminadoFalse(clienteId)
+                .stream().map(MedioPago::getTipo).distinct().collect(Collectors.toList());
+
+        boolean tieneCuenta = tipos.contains("cuenta_bancaria");
+        boolean tieneTarjeta = tipos.contains("tarjeta_credito");
+        boolean tieneCheque = tipos.contains("cheque_certificado");
+        boolean tieneLosTres = tieneCuenta && tieneTarjeta && tieneCheque;
+
+        long subastasGanadas = pujoRepository.findGanadoresByClienteId(clienteId).stream()
+                .map(p -> p.getItem().getCatalogo().getSubasta().getIdentificador())
+                .distinct().count();
+
+        String nuevaCategoria;
+        if (tieneLosTres && subastasGanadas >= 3) {
+            nuevaCategoria = "platino";
+        } else if (tieneLosTres && subastasGanadas >= 1) {
+            nuevaCategoria = "oro";
+        } else if (tieneLosTres) {
+            nuevaCategoria = "plata";
+        } else if (tipos.size() >= 2) {
+            nuevaCategoria = "especial";
+        } else {
+            nuevaCategoria = "comun";
+        }
+
+        cliente.setCategoria(nuevaCategoria);
+        clienteRepository.save(cliente);
+    }
+
 
     public MedioPago validarMedioPagoDelCliente(Integer medioPagoId, Integer clienteId) {
         return medioPagoRepository

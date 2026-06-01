@@ -127,6 +127,7 @@ public class CompraService {
         if (extra != null && extra.getCostoEnvio() != null) total = total.add(extra.getCostoEnvio());
         if (base.getMulta() != null) total = total.add(base.getMulta());
         d.setTotal(total);
+        d.setNumeroPoliza(r.getProducto().getSeguroNroPoliza());
         return d;
     }
 

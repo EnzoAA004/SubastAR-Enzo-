@@ -19,4 +19,6 @@ public class CompraDetalle extends CompraResumen {
     private String facturaUrl;
     @JsonProperty("poliza_id")
     private String polizaId;
+    @JsonProperty("numero_poliza")
+    private String numeroPoliza;
 }
