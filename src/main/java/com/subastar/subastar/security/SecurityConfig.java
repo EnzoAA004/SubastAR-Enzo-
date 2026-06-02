@@ -46,7 +46,8 @@ public class SecurityConfig {
             .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint()))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.POST, "/auth/registro", "/auth/verificar-codigo",
-                        "/auth/completar-registro", "/auth/login").permitAll()
+                        "/auth/completar-registro", "/auth/login", "/auth/login/verificar-2fa",
+                        "/auth/login/reenviar-2fa").permitAll()
                 .requestMatchers(HttpMethod.GET, "/subastas/*/resultado/**").authenticated()
                 .requestMatchers(HttpMethod.GET, "/subastas", "/subastas/**", "/fotos/**", "/paises", "/divisas").permitAll()
                 .anyRequest().authenticated()

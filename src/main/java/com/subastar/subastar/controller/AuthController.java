@@ -55,8 +55,18 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest req) {
-        return ResponseEntity.ok(authService.login(req));
+    public ResponseEntity<LoginTwoFactorStartResponse> login(@Valid @RequestBody LoginRequest req) {
+        return ResponseEntity.ok(authService.iniciarLoginCon2fa(req));
+    }
+
+    @PostMapping("/login/verificar-2fa")
+    public ResponseEntity<LoginResponse> verificarLogin2fa(@Valid @RequestBody LoginTwoFactorVerifyRequest req) {
+        return ResponseEntity.ok(authService.verificarLogin2fa(req));
+    }
+
+    @PostMapping("/login/reenviar-2fa")
+    public ResponseEntity<LoginTwoFactorStartResponse> reenviarLogin2fa(@Valid @RequestBody LoginTwoFactorResendRequest req) {
+        return ResponseEntity.ok(authService.reenviarLogin2fa(req));
     }
 
     @PostMapping("/logout")

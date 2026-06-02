@@ -26,4 +26,15 @@ public class EmailService {
         message.setText("Tu registro fue aprobado. Tu código es: " + codigo);
         mailSender.send(message);
     }
+
+    public void enviarCodigoLogin2fa(String email, String codigo) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setTo(email);
+        message.setSubject("Código de inicio de sesión - SubastAR");
+        message.setText(
+                "Tu código de inicio de sesión es: " + codigo + "\n\n"
+                + "Este código vence en 10 minutos. Si no intentaste iniciar sesión, ignorá este correo."
+        );
+        mailSender.send(message);
+    }
 }

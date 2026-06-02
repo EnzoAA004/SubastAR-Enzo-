@@ -17,7 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
@@ -26,6 +28,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AuthService {
 
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     private final RegistroPendienteRepository registroPendienteRepository;
     private final CredencialRepository credencialRepository;
     private final PersonaRepository personaRepository;
@@ -33,6 +37,7 @@ public class AuthService {
     private final PaisRepository paisRepository;
     private final EmpleadoRepository empleadoRepository;
     private final TokenBlacklistRepository tokenBlacklistRepository;
+    private final LoginTwoFactorTokenRepository loginTwoFactorTokenRepository;
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
@@ -149,7 +154,7 @@ public class AuthService {
         return new LoginResponse(token, "Bearer", resumen);
     }
 
-    public LoginResponse login(LoginRequest req) {
+    public LoginTwoFactorStartResponse iniciarLoginCon2fa(LoginRequest req) {
         Credencial credencial = credencialRepository.findByEmail(req.getEmail())
                 .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
 
@@ -164,10 +169,69 @@ public class AuthService {
             throw new com.subastar.subastar.exception.ForbiddenException("Cuenta bloqueada (usuario derivado a la justicia)");
         }
 
-        Persona persona = credencial.getPersona();
-        String token = jwtUtil.generateToken(req.getEmail(), cliente.getIdentificador(), cliente.getCategoria());
-        UsuarioResumen resumen = buildResumen(cliente, req.getEmail(), persona);
-        return new LoginResponse(token, "Bearer", resumen);
+        return crearLoginTwoFactorToken(credencial, cliente);
+    }
+
+    @Transactional(noRollbackFor = BadRequestException.class)
+    public LoginResponse verificarLogin2fa(LoginTwoFactorVerifyRequest req) {
+        LoginTwoFactorToken twoFactorToken = loginTwoFactorTokenRepository.findByChallengeId(req.getChallengeId())
+                .orElseThrow(() -> new ResourceNotFoundException("Challenge de inicio de sesión no encontrado"));
+
+        if (twoFactorToken.getInvalidatedAt() != null) {
+            throw new BadRequestException("El código fue reemplazado. Pedí uno nuevo.");
+        }
+        if (twoFactorToken.getUsedAt() != null) {
+            throw new BadRequestException("El código ya fue utilizado.");
+        }
+        if (LocalDateTime.now().isAfter(twoFactorToken.getExpiresAt())) {
+            throw new GoneException("El código expiró.");
+        }
+        if (twoFactorToken.getAttempts() >= 5) {
+            throw new BadRequestException("Demasiados intentos. Pedí un nuevo código.");
+        }
+        if (!passwordEncoder.matches(req.getCodigo(), twoFactorToken.getCodigoHash())) {
+            twoFactorToken.setAttempts(twoFactorToken.getAttempts() + 1);
+            loginTwoFactorTokenRepository.save(twoFactorToken);
+            throw new BadRequestException("Código inválido.");
+        }
+
+        Credencial credencial = credencialRepository.findByEmail(twoFactorToken.getEmail())
+                .filter(c -> c.getPersonaId().equals(twoFactorToken.getPersonaId()))
+                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
+        Cliente cliente = clienteRepository.findById(credencial.getPersonaId())
+                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
+
+        if ("bloqueado".equals(estadoCliente(cliente))) {
+            throw new com.subastar.subastar.exception.ForbiddenException("Cuenta bloqueada (usuario derivado a la justicia)");
+        }
+
+        twoFactorToken.setUsedAt(LocalDateTime.now());
+        loginTwoFactorTokenRepository.save(twoFactorToken);
+        return generarLoginResponse(credencial, cliente);
+    }
+
+    public LoginTwoFactorStartResponse reenviarLogin2fa(LoginTwoFactorResendRequest req) {
+        LoginTwoFactorToken twoFactorToken = loginTwoFactorTokenRepository.findByChallengeId(req.getChallengeId())
+                .orElseThrow(() -> new ResourceNotFoundException("Challenge de inicio de sesión no encontrado"));
+
+        if (twoFactorToken.getUsedAt() != null) {
+            throw new BadRequestException("El login ya fue verificado.");
+        }
+        if (twoFactorToken.getInvalidatedAt() != null) {
+            throw new BadRequestException("El código fue reemplazado. Pedí uno nuevo.");
+        }
+
+        Credencial credencial = credencialRepository.findByEmail(twoFactorToken.getEmail())
+                .filter(c -> c.getPersonaId().equals(twoFactorToken.getPersonaId()))
+                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
+        Cliente cliente = clienteRepository.findById(credencial.getPersonaId())
+                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
+
+        if ("bloqueado".equals(estadoCliente(cliente))) {
+            throw new com.subastar.subastar.exception.ForbiddenException("Cuenta bloqueada (usuario derivado a la justicia)");
+        }
+
+        return crearLoginTwoFactorToken(credencial, cliente);
     }
 
     @Transactional
@@ -185,6 +249,42 @@ public class AuthService {
         // Estado simplificado: activo para todos excepto casos específicos
         if (!"si".equals(cliente.getAdmitido())) return "bloqueado";
         return "activo";
+    }
+
+    private LoginTwoFactorStartResponse crearLoginTwoFactorToken(Credencial credencial, Cliente cliente) {
+        invalidarLoginTwoFactorTokensActivos(credencial.getEmail());
+
+        String codigo = String.format("%06d", SECURE_RANDOM.nextInt(1000000));
+        LoginTwoFactorToken twoFactorToken = new LoginTwoFactorToken();
+        twoFactorToken.setChallengeId(UUID.randomUUID().toString());
+        twoFactorToken.setEmail(credencial.getEmail());
+        twoFactorToken.setPersonaId(cliente.getIdentificador());
+        twoFactorToken.setCodigoHash(passwordEncoder.encode(codigo));
+        twoFactorToken.setExpiresAt(LocalDateTime.now().plusMinutes(10));
+        loginTwoFactorTokenRepository.save(twoFactorToken);
+
+        emailService.enviarCodigoLogin2fa(credencial.getEmail(), codigo);
+
+        return new LoginTwoFactorStartResponse(
+                true,
+                twoFactorToken.getChallengeId(),
+                credencial.getEmail(),
+                "Te enviamos un código de verificación a tu correo."
+        );
+    }
+
+    private void invalidarLoginTwoFactorTokensActivos(String email) {
+        List<LoginTwoFactorToken> activos = loginTwoFactorTokenRepository
+                .findByEmailAndUsedAtIsNullAndInvalidatedAtIsNull(email);
+        LocalDateTime now = LocalDateTime.now();
+        activos.forEach(token -> token.setInvalidatedAt(now));
+        loginTwoFactorTokenRepository.saveAll(activos);
+    }
+
+    private LoginResponse generarLoginResponse(Credencial credencial, Cliente cliente) {
+        String token = jwtUtil.generateToken(credencial.getEmail(), cliente.getIdentificador(), cliente.getCategoria());
+        UsuarioResumen resumen = buildResumen(cliente, credencial.getEmail(), credencial.getPersona());
+        return new LoginResponse(token, "Bearer", resumen);
     }
 
     private UsuarioResumen buildResumen(Cliente cliente, String email, Persona persona) {
