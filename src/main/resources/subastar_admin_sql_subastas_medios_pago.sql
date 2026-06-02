@@ -344,6 +344,7 @@ DECLARE @comision_item DECIMAL(18,2);
 DECLARE @medio_pago_id INT;
 DECLARE @registro_id INT;
 DECLARE @nombre_item NVARCHAR(255);
+DECLARE @nro_poliza VARCHAR(30);
 
 BEGIN TRY
     BEGIN TRANSACTION;
@@ -372,6 +373,7 @@ BEGIN TRY
         @producto_id = ic.producto,
         @comision_item = ISNULL(ic.comision, 0),
         @duenio_id = p.duenio,
+        @nro_poliza = p.seguro,
         @nombre_item = COALESCE(pd.nombre, p.descripcionCatalogo, 'Ítem #' + CAST(ic.identificador AS VARCHAR(20)))
     FROM itemsCatalogo ic
     INNER JOIN productos p ON p.identificador = ic.producto
@@ -446,6 +448,50 @@ BEGIN TRY
             @direccion_entrega,
             NULL
         );
+    END;
+
+    IF @nro_poliza IS NOT NULL
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM seguros WHERE nroPoliza = @nro_poliza)
+        BEGIN
+            THROW 51403, 'La poliza asociada al producto no existe.', 1;
+        END;
+
+        IF EXISTS (
+            SELECT 1
+            FROM seguros_extra
+            WHERE poliza_id = @nro_poliza
+              AND beneficiario_id IS NOT NULL
+              AND beneficiario_id <> @cliente_ganador_id
+        )
+        BEGIN
+            THROW 51404, 'La poliza asociada al producto ya pertenece a otro beneficiario.', 1;
+        END;
+
+        IF EXISTS (SELECT 1 FROM seguros_extra WHERE poliza_id = @nro_poliza)
+        BEGIN
+            UPDATE seguros_extra
+            SET beneficiario_id = @cliente_ganador_id
+            WHERE poliza_id = @nro_poliza
+              AND beneficiario_id IS NULL;
+        END
+        ELSE
+        BEGIN
+            INSERT INTO seguros_extra (
+                poliza_id,
+                beneficiario_id,
+                vigencia_desde,
+                vigencia_hasta,
+                cobertura
+            )
+            VALUES (
+                @nro_poliza,
+                @cliente_ganador_id,
+                CAST(GETDATE() AS DATE),
+                DATEADD(YEAR, 1, CAST(GETDATE() AS DATE)),
+                N'Cobertura asociada a compra ganada en subasta'
+            );
+        END;
     END;
 
     UPDATE itemsCatalogo

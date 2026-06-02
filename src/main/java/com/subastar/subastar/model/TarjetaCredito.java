@@ -27,6 +27,6 @@ public class TarjetaCredito {
     @Column(name = "dni_titular", nullable = false)
     private String dniTitular;
 
-    @Column(name = "es_internacional", nullable = false)
+    @Column(name = "es_internacional", nullable = false, columnDefinition = "BIT DEFAULT 0")
     private boolean esInternacional = false;
 }

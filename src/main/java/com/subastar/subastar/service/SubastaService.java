@@ -101,10 +101,8 @@ public class SubastaService {
                 }
 
                 BigDecimal precioBase = itemActual.getPrecioBase();
-                BigDecimal uno = precioBase.multiply(BigDecimal.valueOf(0.01));
-                BigDecimal veinte = precioBase.multiply(BigDecimal.valueOf(0.20));
-                resp.setPujaMinima(mejorOferta.add(uno));
-                resp.setPujaMaxima(mejorOferta.add(veinte));
+                resp.setPujaMinima(calcularPujaMinima(precioBase, mejorOferta));
+                resp.setPujaMaxima(calcularPujaMaxima(precioBase, mejorOferta));
 
                 List<PujaResumen> historial = pujoRepository
                         .findByItemIdentificadorOrderByIdentificadorDesc(itemActual.getIdentificador())
@@ -232,5 +230,20 @@ public class SubastaService {
                 .ifPresent(pe -> r.setTimestamp(pe.getTimestampPuja()));
         r.setEsGanadora("si".equals(p.getGanador()));
         return r;
+    }
+
+    private BigDecimal calcularPujaMinima(BigDecimal precioBase, BigDecimal mejorOferta) {
+        if (precioBase == null) return BigDecimal.ZERO;
+        if (mejorOferta == null || mejorOferta.compareTo(BigDecimal.ZERO) <= 0) return precioBase;
+        return mejorOferta.add(precioBase.multiply(BigDecimal.valueOf(0.01)));
+    }
+
+    private BigDecimal calcularPujaMaxima(BigDecimal precioBase, BigDecimal mejorOferta) {
+        if (precioBase == null) return BigDecimal.ZERO;
+        BigDecimal incrementoMaximo = precioBase.multiply(BigDecimal.valueOf(0.20));
+        if (mejorOferta == null || mejorOferta.compareTo(BigDecimal.ZERO) <= 0) {
+            return precioBase.add(incrementoMaximo);
+        }
+        return mejorOferta.add(incrementoMaximo);
     }
 }

@@ -85,6 +85,7 @@ CREATE TABLE tarjetas_credito (
     titular              VARCHAR(100) NOT NULL,
     vencimiento          VARCHAR(10) NOT NULL,
     dni_titular          VARCHAR(20) NOT NULL,
+    es_internacional     BIT NOT NULL DEFAULT 0,
     CONSTRAINT pk_tarjetas_credito PRIMARY KEY (id),
     CONSTRAINT uq_tarjetas_medio UNIQUE (medio_pago_id),
     CONSTRAINT fk_tarjetas_medios FOREIGN KEY (medio_pago_id) REFERENCES medios_pago(id)

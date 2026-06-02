@@ -116,16 +116,16 @@ public class PujaService {
 
         boolean esOroOPlatino = "oro".equals(cliente.getCategoria()) || "platino".equals(cliente.getCategoria());
 
-        BigDecimal minimo = mejorOferta.add(precioBase.multiply(BigDecimal.valueOf(0.01)));
+        BigDecimal minimo = calcularPujaMinima(precioBase, mejorOferta);
 
         if (req.getMonto().compareTo(minimo) < 0) {
-            throw new BadRequestException("El monto mínimo es " + minimo);
+            throw new BadRequestException("La puja mínima para este lote es " + minimo);
         }
 
         if (!esOroOPlatino) {
-            BigDecimal maximo = mejorOferta.add(precioBase.multiply(BigDecimal.valueOf(0.20)));
+            BigDecimal maximo = calcularPujaMaxima(precioBase, mejorOferta);
             if (req.getMonto().compareTo(maximo) > 0) {
-                throw new BadRequestException("El monto máximo es " + maximo);
+                throw new BadRequestException("La puja máxima permitida para tu categoría es " + maximo);
             }
         }
 
@@ -204,6 +204,21 @@ public class PujaService {
     private boolean categoriaHabilita(String categoriaCliente, String categoriaSubasta) {
         if (categoriaSubasta == null) return true;
         return nivelCategoria(categoriaCliente) >= nivelCategoria(categoriaSubasta);
+    }
+
+    private BigDecimal calcularPujaMinima(BigDecimal precioBase, BigDecimal mejorOferta) {
+        if (precioBase == null) return BigDecimal.ZERO;
+        if (mejorOferta == null || mejorOferta.compareTo(BigDecimal.ZERO) <= 0) return precioBase;
+        return mejorOferta.add(precioBase.multiply(BigDecimal.valueOf(0.01)));
+    }
+
+    private BigDecimal calcularPujaMaxima(BigDecimal precioBase, BigDecimal mejorOferta) {
+        if (precioBase == null) return BigDecimal.ZERO;
+        BigDecimal incrementoMaximo = precioBase.multiply(BigDecimal.valueOf(0.20));
+        if (mejorOferta == null || mejorOferta.compareTo(BigDecimal.ZERO) <= 0) {
+            return precioBase.add(incrementoMaximo);
+        }
+        return mejorOferta.add(incrementoMaximo);
     }
 
     // A-11: validar que la puja no supere el límite del medio de pago

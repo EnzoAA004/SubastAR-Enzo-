@@ -1,8 +1,6 @@
 package com.subastar.subastar.controller;
 
-import com.subastar.subastar.dto.chat.ConversacionResumen;
-import com.subastar.subastar.dto.chat.MensajeChatResponse;
-import com.subastar.subastar.dto.chat.EnviarMensajeRequest;
+import com.subastar.subastar.dto.chat.*;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import com.subastar.subastar.service.ChatService;
@@ -25,6 +23,26 @@ public class ChatController {
     public ResponseEntity<List<ConversacionResumen>> getConversaciones(
             @AuthenticationPrincipal UserDetails user) {
         return ResponseEntity.ok(chatService.getConversaciones(user.getUsername()));
+    }
+
+    @GetMapping("/notificaciones/resumen")
+    public ResponseEntity<ChatNotificacionesResumen> getResumenNotificaciones(
+            @AuthenticationPrincipal UserDetails user) {
+        return ResponseEntity.ok(chatService.getResumenNotificaciones(user.getUsername()));
+    }
+
+    @GetMapping("/notificaciones")
+    public ResponseEntity<List<NotificacionResponse>> getNotificaciones(
+            @AuthenticationPrincipal UserDetails user) {
+        return ResponseEntity.ok(chatService.getNotificaciones(user.getUsername()));
+    }
+
+    @PostMapping("/notificaciones/marcar-leidas")
+    public ResponseEntity<Void> marcarNotificacionesLeidas(
+            @RequestBody(required = false) MarcarNotificacionesLeidasRequest req,
+            @AuthenticationPrincipal UserDetails user) {
+        chatService.marcarNotificacionesLeidas(user.getUsername(), req);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/conversaciones/{tipo}")

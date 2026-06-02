@@ -19,4 +19,8 @@ public class CompraResumen {
     private String estadoPago;
     @JsonProperty("estado_entrega")
     private String estadoEntrega;
+    @JsonProperty("poliza_id")
+    private String polizaId;
+    @JsonProperty("numero_poliza")
+    private String numeroPoliza;
 }

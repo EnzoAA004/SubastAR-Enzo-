@@ -3,6 +3,7 @@ package com.subastar.subastar.service;
 import com.subastar.subastar.dto.compra.CompraDetalle;
 import com.subastar.subastar.dto.compra.CompraResumen;
 import com.subastar.subastar.dto.compra.RegularizarPagoRequest;
+import com.subastar.subastar.exception.BadRequestException;
 import com.subastar.subastar.exception.ForbiddenException;
 import com.subastar.subastar.exception.ResourceNotFoundException;
 import com.subastar.subastar.model.*;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -26,6 +28,8 @@ public class CompraService {
     private final MedioPagoRepository medioPagoRepository;
     private final CredencialRepository credencialRepository;
     private final NotificacionService notificacionService;
+    private final SeguroRepository seguroRepository;
+    private final SeguroExtraRepository seguroExtraRepository;
 
     public List<CompraResumen> listar(String email, String estadoPago, String estadoEntrega) {
         Integer clienteId = getClienteId(email);
@@ -81,11 +85,15 @@ public class CompraService {
     }
 
     private CompraResumen toResumen(RegistroDeSubasta r, CompraExtra extra) {
+        asociarPolizaAlGanador(r);
         CompraResumen c = new CompraResumen();
         c.setId(r.getIdentificador());
         c.setNombreItem(r.getProducto().getDescripcionCatalogo());
         c.setSubasta("Subasta #" + r.getSubasta().getIdentificador());
         c.setValorPujado(r.getImporte());
+        String nroPoliza = r.getProducto() != null ? r.getProducto().getSeguroNroPoliza() : null;
+        c.setPolizaId(nroPoliza);
+        c.setNumeroPoliza(nroPoliza);
 
         if (extra != null) {
             c.setFecha(extra.getFechaCompra());
@@ -109,7 +117,7 @@ public class CompraService {
         d.setSubasta(base.getSubasta()); d.setFecha(base.getFecha());
         d.setValorPujado(base.getValorPujado()); d.setMulta(base.getMulta());
         d.setEstadoPago(base.getEstadoPago()); d.setEstadoEntrega(base.getEstadoEntrega());
-        d.setPolizaId(r.getProducto().getSeguroNroPoliza());
+        d.setPolizaId(base.getPolizaId()); d.setNumeroPoliza(base.getNumeroPoliza());
 
         if (extra != null) {
             if (extra.getMedioPagoId() != null) {
@@ -127,8 +135,34 @@ public class CompraService {
         if (extra != null && extra.getCostoEnvio() != null) total = total.add(extra.getCostoEnvio());
         if (base.getMulta() != null) total = total.add(base.getMulta());
         d.setTotal(total);
-        d.setNumeroPoliza(r.getProducto().getSeguroNroPoliza());
         return d;
+    }
+
+    private void asociarPolizaAlGanador(RegistroDeSubasta registro) {
+        if (registro.getProducto() == null) return;
+        String nroPoliza = registro.getProducto().getSeguroNroPoliza();
+        if (nroPoliza == null || nroPoliza.isBlank()) return;
+        if (!seguroRepository.existsById(nroPoliza)) {
+            throw new BadRequestException("La póliza asociada al producto no existe");
+        }
+
+        Integer clienteGanadorId = registro.getCliente().getIdentificador();
+        SeguroExtra extra = seguroExtraRepository.findById(nroPoliza).orElseGet(() -> {
+            SeguroExtra nuevo = new SeguroExtra();
+            nuevo.setPolizaId(nroPoliza);
+            nuevo.setVigenciaDesde(LocalDate.now());
+            nuevo.setVigenciaHasta(LocalDate.now().plusYears(1));
+            nuevo.setCobertura("Cobertura asociada a compra ganada en subasta");
+            return nuevo;
+        });
+
+        if (extra.getBeneficiarioId() != null && !extra.getBeneficiarioId().equals(clienteGanadorId)) {
+            throw new BadRequestException("La póliza asociada al producto ya pertenece a otro beneficiario");
+        }
+        if (extra.getBeneficiarioId() == null) {
+            extra.setBeneficiarioId(clienteGanadorId);
+            seguroExtraRepository.save(extra);
+        }
     }
 
     private Integer getClienteId(String email) {

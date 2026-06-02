@@ -10,12 +10,20 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/seguros")
 @RequiredArgsConstructor
 public class SeguroController {
 
     private final SeguroService seguroService;
+
+    @GetMapping
+    public ResponseEntity<List<PolizaResponse>> listarMisPolizas(
+            @AuthenticationPrincipal UserDetails user) {
+        return ResponseEntity.ok(seguroService.listarMisPolizas(user.getUsername()));
+    }
 
     @GetMapping("/{polizaId}")
     public ResponseEntity<PolizaResponse> getPoliza(

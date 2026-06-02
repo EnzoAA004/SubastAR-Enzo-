@@ -24,6 +24,16 @@ public class SeguroService {
     private final CredencialRepository credencialRepository;
     private final ClienteRepository clienteRepository;
 
+    public List<PolizaResponse> listarMisPolizas(String email) {
+        Integer clienteId = getClienteId(email);
+        return seguroExtraRepository.findByBeneficiarioId(clienteId).stream()
+                .map(extra -> seguroRepository.findById(extra.getPolizaId())
+                        .map(seguro -> toPolizaResponse(seguro, extra, clienteId))
+                        .orElse(null))
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toList());
+    }
+
     public PolizaResponse getPoliza(String email, String polizaId) {
         Integer clienteId = getClienteId(email);
         Seguro seguro = seguroRepository.findById(polizaId)

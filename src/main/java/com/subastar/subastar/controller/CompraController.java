@@ -13,6 +13,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -64,20 +66,51 @@ public class CompraController {
             @PathVariable Integer id,
             @AuthenticationPrincipal UserDetails user) {
         CompraDetalle detalle = compraService.getDetalle(user.getUsername(), id);
-        String fecha = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
+        String fechaEmision = fecha(LocalDateTime.now());
         String contenido = "FACTURA - SUBASTAR\n"
-                + "==================\n"
-                + "Fecha: " + fecha + "\n"
-                + "Compra ID: " + id + "\n"
-                + "Item: " + detalle.getNombreItem() + "\n"
-                + "Subasta: " + detalle.getSubasta() + "\n"
-                + "Valor pujado: " + detalle.getValorPujado() + "\n"
-                + "Total: " + detalle.getTotal() + "\n"
-                + "Estado de pago: " + detalle.getEstadoPago() + "\n";
-        byte[] bytes = contenido.getBytes();
+                + "==================\n\n"
+                + "Datos de la compra\n"
+                + "------------------\n"
+                + "Fecha de emisión: " + fechaEmision + "\n"
+                + "Compra ID: " + valor(detalle.getId()) + "\n"
+                + "Fecha de compra: " + fecha(detalle.getFecha()) + "\n"
+                + "Item: " + valor(detalle.getNombreItem()) + "\n"
+                + "Subasta: " + valor(detalle.getSubasta()) + "\n\n"
+                + "Importes\n"
+                + "--------\n"
+                + "Valor pujado: " + dinero(detalle.getValorPujado()) + "\n"
+                + "Costo de envío: " + dinero(detalle.getCostoEnvio()) + "\n"
+                + "Multa: " + dinero(detalle.getMulta()) + "\n"
+                + "Total: " + dinero(detalle.getTotal()) + "\n\n"
+                + "Pago\n"
+                + "----\n"
+                + "Estado de pago: " + valor(detalle.getEstadoPago()) + "\n"
+                + "Medio de pago: " + valor(detalle.getMedioPago()) + "\n\n"
+                + "Entrega\n"
+                + "-------\n"
+                + "Estado de entrega: " + valor(detalle.getEstadoEntrega()) + "\n"
+                + "Dirección de entrega: " + valor(detalle.getDireccionEntrega()) + "\n\n"
+                + "Seguro / póliza\n"
+                + "---------------\n"
+                + "Póliza ID: " + valor(detalle.getPolizaId()) + "\n"
+                + "Número de póliza: " + valor(detalle.getNumeroPoliza()) + "\n\n"
+                + "Gracias por operar con SubastAR.\n";
+        byte[] bytes = contenido.getBytes(StandardCharsets.UTF_8);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"factura-" + id + ".txt\"")
                 .contentType(MediaType.TEXT_PLAIN)
                 .body(bytes);
+    }
+
+    private String valor(Object value) {
+        return value != null ? value.toString() : "No informado";
+    }
+
+    private String dinero(BigDecimal value) {
+        return value != null ? "ARS " + value.toPlainString() : "ARS 0.00";
+    }
+
+    private String fecha(LocalDateTime value) {
+        return value != null ? value.format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")) : "No informado";
     }
 }
