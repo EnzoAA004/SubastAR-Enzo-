@@ -36,8 +36,8 @@ public class AuthController {
         req.setPaisOrigen(paisOrigen);
 
         authService.registroStep1(req, fotoDniFrente, fotoDniDorso);
-        return ResponseEntity.status(HttpStatus.ACCEPTED)
-                .body(Map.of("message", "Solicitud recibida. Te notificaremos por email cuando tu cuenta sea aprobada."));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(Map.of("message", "Código enviado al correo."));
     }
 
     @PostMapping("/verificar-codigo")
@@ -55,18 +55,31 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<LoginTwoFactorStartResponse> login(@Valid @RequestBody LoginRequest req) {
-        return ResponseEntity.ok(authService.iniciarLoginCon2fa(req));
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest req) {
+        return ResponseEntity.ok(authService.login(req));
     }
 
-    @PostMapping("/login/verificar-2fa")
-    public ResponseEntity<LoginResponse> verificarLogin2fa(@Valid @RequestBody LoginTwoFactorVerifyRequest req) {
-        return ResponseEntity.ok(authService.verificarLogin2fa(req));
+    @PostMapping("/registro/reenviar-codigo")
+    public ResponseEntity<Map<String, String>> reenviarCodigoRegistro(@Valid @RequestBody ReenviarCodigoRegistroRequest req) {
+        authService.reenviarCodigoRegistro(req);
+        return ResponseEntity.ok(Map.of("message", "Te enviamos un nuevo código. El código anterior ya no es válido."));
     }
 
-    @PostMapping("/login/reenviar-2fa")
-    public ResponseEntity<LoginTwoFactorStartResponse> reenviarLogin2fa(@Valid @RequestBody LoginTwoFactorResendRequest req) {
-        return ResponseEntity.ok(authService.reenviarLogin2fa(req));
+    @PostMapping("/registro-pendiente/cancelar")
+    public ResponseEntity<Map<String, String>> cancelarRegistroPendiente(@Valid @RequestBody CancelarRegistroPendienteRequest req) {
+        authService.cancelarRegistroPendiente(req);
+        return ResponseEntity.ok(Map.of("message", "Registro pendiente eliminado. Podés iniciar el registro nuevamente."));
+    }
+
+    @PostMapping("/recuperar-password")
+    public ResponseEntity<Map<String, String>> recuperarPassword(@Valid @RequestBody RecuperarPasswordRequest req) {
+        return ResponseEntity.ok(Map.of("message", authService.recuperarPassword(req)));
+    }
+
+    @PostMapping("/recuperar-password/confirmar")
+    public ResponseEntity<Map<String, String>> confirmarRecuperarPassword(@Valid @RequestBody ConfirmarRecuperarPasswordRequest req) {
+        authService.confirmarRecuperarPassword(req);
+        return ResponseEntity.ok(Map.of("message", "Contraseña actualizada correctamente."));
     }
 
     @PostMapping("/logout")

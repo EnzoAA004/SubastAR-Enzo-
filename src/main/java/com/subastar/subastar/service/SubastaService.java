@@ -6,12 +6,15 @@ import com.subastar.subastar.exception.ResourceNotFoundException;
 import com.subastar.subastar.model.*;
 import com.subastar.subastar.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -29,6 +32,11 @@ public class SubastaService {
     private final ProductoDetalleRepository productoDetalleRepository;
     private final FotoRepository fotoRepository;
     private final CredencialRepository credencialRepository;
+    private final BienSolicitudRepository bienSolicitudRepository;
+    private final BienSolicitudArchivoRepository bienSolicitudArchivoRepository;
+
+    @Value("${cloudinary.cloud-name:${cloudinary.cloud_name:}}")
+    private String cloudinaryCloudName;
 
     public List<SubastaResumen> listar(String estado, String categoria, String moneda, String busqueda) {
         return subastaRepository.findAll().stream()
@@ -196,9 +204,7 @@ public class SubastaService {
 
         r.setEstado(calcEstadoItem(item));
 
-        List<String> imgs = fotoRepository.findByProductoIdentificador(prod.getIdentificador())
-                .stream().map(f -> "/api/v1/fotos/" + f.getIdentificador()).collect(Collectors.toList());
-        r.setImagenes(imgs);
+        r.setImagenes(getImagenesProducto(prod.getIdentificador()));
 
         if (prod.getDuenio() != null && prod.getDuenio().getPersona() != null) {
             r.setDuenoActual(prod.getDuenio().getPersona().getNombre());
@@ -230,6 +236,53 @@ public class SubastaService {
                 .ifPresent(pe -> r.setTimestamp(pe.getTimestampPuja()));
         r.setEsGanadora("si".equals(p.getGanador()));
         return r;
+    }
+
+    private List<String> getImagenesProducto(Integer productoId) {
+        List<String> imagenes = new ArrayList<>();
+
+        bienSolicitudRepository.findByProductoId(productoId).ifPresent(solicitud -> {
+            List<BienSolicitudArchivo> fotos = bienSolicitudArchivoRepository
+                    .findBySolicitudIdAndTipoArchivo(solicitud.getId(), "foto");
+
+            fotos.stream()
+                    .map(BienSolicitudArchivo::getUrl)
+                    .map(this::buildImageUrl)
+                    .filter(Objects::nonNull)
+                    .forEach(imagenes::add);
+        });
+
+        if (!imagenes.isEmpty()) {
+            return imagenes;
+        }
+
+        return imagenesLegacyProducto(productoId);
+    }
+
+    private List<String> imagenesLegacyProducto(Integer productoId) {
+        return fotoRepository.findByProductoIdentificador(productoId)
+                .stream()
+                .map(f -> "/api/v1/fotos/" + f.getIdentificador())
+                .collect(Collectors.toList());
+    }
+
+    private String buildImageUrl(String storedValue) {
+        if (storedValue == null || storedValue.isBlank()) {
+            return null;
+        }
+
+        if (storedValue.startsWith("http://") || storedValue.startsWith("https://")) {
+            return storedValue;
+        }
+
+        if (cloudinaryCloudName == null || cloudinaryCloudName.isBlank()) {
+            return null;
+        }
+
+        return "https://res.cloudinary.com/"
+                + cloudinaryCloudName
+                + "/image/upload/f_auto,q_auto/"
+                + storedValue;
     }
 
     private BigDecimal calcularPujaMinima(BigDecimal precioBase, BigDecimal mejorOferta) {

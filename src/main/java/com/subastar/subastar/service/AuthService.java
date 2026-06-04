@@ -4,6 +4,7 @@ import com.subastar.subastar.dto.auth.*;
 import com.subastar.subastar.dto.usuario.UsuarioResumen;
 import com.subastar.subastar.exception.BadRequestException;
 import com.subastar.subastar.exception.ConflictException;
+import com.subastar.subastar.exception.ForbiddenException;
 import com.subastar.subastar.exception.GoneException;
 import com.subastar.subastar.exception.ResourceNotFoundException;
 import com.subastar.subastar.exception.UnauthorizedException;
@@ -11,6 +12,8 @@ import com.subastar.subastar.model.*;
 import com.subastar.subastar.repository.*;
 import com.subastar.subastar.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.mail.MailException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,15 +23,17 @@ import java.io.IOException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Random;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @Transactional
 @RequiredArgsConstructor
 public class AuthService {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final String RECUPERACION_MESSAGE =
+            "Si el email existe, enviamos instrucciones para recuperar la contraseña.";
 
     private final RegistroPendienteRepository registroPendienteRepository;
     private final CredencialRepository credencialRepository;
@@ -37,29 +42,38 @@ public class AuthService {
     private final PaisRepository paisRepository;
     private final EmpleadoRepository empleadoRepository;
     private final TokenBlacklistRepository tokenBlacklistRepository;
-    private final LoginTwoFactorTokenRepository loginTwoFactorTokenRepository;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
 
     @Transactional
     public void registroStep1(RegistroStep1Request req, MultipartFile dniFrente, MultipartFile dniDorso) {
-        if (credencialRepository.existsByEmail(req.getEmail())) {
+        String email = req.getEmail() != null ? req.getEmail().trim() : null;
+        log.info("Inicio de registro");
+        log.info("Email recibido para registro: {}", email);
+
+        if (credencialRepository.existsByEmail(email)) {
+            log.info("Registro rechazado: email ya existe como credencial: {}", email);
             throw new ConflictException("El email ya está registrado");
         }
-        if (registroPendienteRepository.existsByEmail(req.getEmail())) {
-            throw new ConflictException("El email ya está registrado");
+        if (registroPendienteRepository.existsByEmail(email)) {
+            log.info("Registro rechazado: email ya existe como registro pendiente: {}", email);
+            throw new ConflictException("Ya hay un registro pendiente para este email. Podés reenviar el código o cancelar el registro pendiente.");
         }
 
-        // Buscar número de país por nombre
         Pais pais = paisRepository.findAll().stream()
-                .filter(p -> p.getNombre() != null && p.getNombre().equalsIgnoreCase(req.getPaisOrigen())
-                          || p.getNombreCorto() != null && p.getNombreCorto().equalsIgnoreCase(req.getPaisOrigen()))
+                .filter(p -> (p.getNombre() != null && p.getNombre().equalsIgnoreCase(req.getPaisOrigen()))
+                        || (p.getNombreCorto() != null && p.getNombreCorto().equalsIgnoreCase(req.getPaisOrigen())))
                 .findFirst()
-                .orElseThrow(() -> new BadRequestException("País no encontrado: " + req.getPaisOrigen()));
+                .orElseThrow(() -> {
+                    log.info("País no encontrado en registro: {}", req.getPaisOrigen());
+                    return new BadRequestException("País no encontrado: " + req.getPaisOrigen());
+                });
+        log.info("País encontrado para registro: {} ({})", pais.getNombre(), pais.getNumero());
 
         RegistroPendiente registro = new RegistroPendiente();
-        registro.setEmail(req.getEmail());
+        registro.setEmail(email);
         registro.setNombre(req.getNombre());
         registro.setApellido(req.getApellido());
         registro.setDomicilio(req.getDomicilio());
@@ -73,14 +87,20 @@ public class AuthService {
             throw new BadRequestException("Error al procesar las imágenes del DNI");
         }
 
-        // Auto-aprobación para TPO: generar código de verificación inmediatamente
-        String codigo = String.format("%04d", new Random().nextInt(10000));
+        String codigo = generarCodigoRegistro();
         registro.setCodigoVerificacion(codigo);
         registro.setCodigoExpiresAt(LocalDateTime.now().plusHours(24));
         registro.setEstado("aprobado");
-
         registroPendienteRepository.save(registro);
-        emailService.enviarNotificacionAprobacion(req.getEmail(), codigo);
+        log.info("RegistroPendiente creado para email: {}", email);
+
+        try {
+            emailService.enviarNotificacionAprobacion(email, codigo);
+            log.info("Email de registro enviado a: {}", email);
+        } catch (MailException e) {
+            log.error("Error de mail al enviar código de registro a {}", email, e);
+            throw new BadRequestException("No se pudo enviar el email de verificación. Intentá nuevamente.");
+        }
     }
 
     @Transactional
@@ -113,10 +133,12 @@ public class AuthService {
             throw new BadRequestException("Token de verificación expirado");
         }
         if (!req.getPassword().equals(req.getPasswordConfirmacion())) {
-            throw new BadRequestException("Las contraseñas no coinciden o no cumplen requisitos mínimos");
+            throw new BadRequestException("Las contraseñas no coinciden");
+        }
+        if (credencialRepository.existsByEmail(registro.getEmail())) {
+            throw new ConflictException("La cuenta ya fue creada.");
         }
 
-        // Crear Persona
         Persona persona = new Persona();
         persona.setNombre(registro.getNombre() + " " + registro.getApellido());
         persona.setDocumento("PENDIENTE");
@@ -125,11 +147,9 @@ public class AuthService {
         persona.setFoto(registro.getFotoDniFrente());
         persona = personaRepository.save(persona);
 
-        // Necesitamos un empleado verificador. Usar el primero disponible.
         Empleado verificador = empleadoRepository.findAll().stream().findFirst()
                 .orElseThrow(() -> new BadRequestException("No hay empleados verificadores disponibles. Contacte al administrador."));
 
-        // Crear Cliente
         Cliente cliente = new Cliente();
         cliente.setIdentificador(persona.getIdentificador());
         cliente.setAdmitido("si");
@@ -139,99 +159,133 @@ public class AuthService {
         if (pais != null) cliente.setPais(pais);
         clienteRepository.save(cliente);
 
-        // Crear Credencial
         Credencial credencial = new Credencial();
         credencial.setPersonaId(persona.getIdentificador());
         credencial.setEmail(registro.getEmail());
         credencial.setPasswordHash(passwordEncoder.encode(req.getPassword()));
         credencialRepository.save(credencial);
 
-        // Eliminar el registro pendiente
         registroPendienteRepository.delete(registro);
-
-        String token = jwtUtil.generateToken(registro.getEmail(), cliente.getIdentificador(), "comun");
-        UsuarioResumen resumen = buildResumen(cliente, registro.getEmail(), persona);
-        return new LoginResponse(token, "Bearer", resumen);
+        return generarLoginResponse(credencial, cliente, persona);
     }
 
-    public LoginTwoFactorStartResponse iniciarLoginCon2fa(LoginRequest req) {
+    public LoginResponse login(LoginRequest req) {
         Credencial credencial = credencialRepository.findByEmail(req.getEmail())
-                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
+                .orElseThrow(() -> new UnauthorizedException("Email o contraseña incorrectos"));
 
         if (!passwordEncoder.matches(req.getPassword(), credencial.getPasswordHash())) {
-            throw new UnauthorizedException("Credenciales incorrectas");
+            throw new UnauthorizedException("Email o contraseña incorrectos");
         }
 
         Cliente cliente = clienteRepository.findById(credencial.getPersonaId())
-                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
+                .orElseThrow(() -> new UnauthorizedException("Email o contraseña incorrectos"));
 
         if ("bloqueado".equals(estadoCliente(cliente))) {
-            throw new com.subastar.subastar.exception.ForbiddenException("Cuenta bloqueada (usuario derivado a la justicia)");
+            throw new ForbiddenException("Cuenta bloqueada o inactiva");
         }
 
-        return crearLoginTwoFactorToken(credencial, cliente);
+        return generarLoginResponse(credencial, cliente, credencial.getPersona());
+    }
+
+    @Transactional
+    public void reenviarCodigoRegistro(ReenviarCodigoRegistroRequest req) {
+        String email = req.getEmail().trim();
+        if (credencialRepository.existsByEmail(email)) {
+            throw new ConflictException("La cuenta ya fue creada.");
+        }
+
+        RegistroPendiente registro = registroPendienteRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("No hay registro pendiente para este email."));
+
+        String codigo = generarCodigoRegistro();
+        registro.setCodigoVerificacion(codigo);
+        registro.setCodigoExpiresAt(LocalDateTime.now().plusHours(24));
+        registro.setTokenVerificacion(null);
+        registro.setTokenExpiresAt(null);
+        registro.setEstado("aprobado");
+        registroPendienteRepository.save(registro);
+
+        try {
+            emailService.enviarNotificacionAprobacion(email, codigo);
+            log.info("Código de registro reenviado a: {}", email);
+        } catch (MailException e) {
+            log.error("Error de mail al reenviar código de registro a {}", email, e);
+            throw new BadRequestException("No se pudo reenviar el código. Intentá nuevamente.");
+        }
+    }
+
+    @Transactional
+    public void cancelarRegistroPendiente(CancelarRegistroPendienteRequest req) {
+        String email = req.getEmail().trim();
+        if (credencialRepository.existsByEmail(email)) {
+            throw new ConflictException("La cuenta ya fue creada.");
+        }
+
+        RegistroPendiente registro = registroPendienteRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("No hay registro pendiente para este email."));
+        registroPendienteRepository.delete(registro);
+        log.info("Registro pendiente eliminado para email: {}", email);
+    }
+
+    @Transactional
+    public String recuperarPassword(RecuperarPasswordRequest req) {
+        String email = req.getEmail().trim();
+        Credencial credencial = credencialRepository.findByEmail(email).orElse(null);
+        if (credencial == null) {
+            return RECUPERACION_MESSAGE;
+        }
+
+        invalidarPasswordResetTokensActivos(email);
+
+        String codigo = generarCodigoSeisDigitos();
+        PasswordResetToken resetToken = new PasswordResetToken();
+        resetToken.setEmail(email);
+        resetToken.setToken(UUID.randomUUID().toString());
+        resetToken.setCodigoHash(passwordEncoder.encode(codigo));
+        resetToken.setExpiresAt(LocalDateTime.now().plusMinutes(10));
+        passwordResetTokenRepository.save(resetToken);
+
+        try {
+            emailService.enviarCodigoRecuperacionPassword(email, codigo);
+            log.info("Email de recuperación de contraseña enviado a: {}", email);
+        } catch (MailException e) {
+            log.error("Error de mail al enviar recuperación de contraseña a {}", email, e);
+            throw new BadRequestException("No se pudo enviar el email de recuperación. Intentá nuevamente.");
+        }
+
+        return RECUPERACION_MESSAGE;
     }
 
     @Transactional(noRollbackFor = BadRequestException.class)
-    public LoginResponse verificarLogin2fa(LoginTwoFactorVerifyRequest req) {
-        LoginTwoFactorToken twoFactorToken = loginTwoFactorTokenRepository.findByChallengeId(req.getChallengeId())
-                .orElseThrow(() -> new ResourceNotFoundException("Challenge de inicio de sesión no encontrado"));
+    public void confirmarRecuperarPassword(ConfirmarRecuperarPasswordRequest req) {
+        String email = req.getEmail().trim();
+        PasswordResetToken resetToken = passwordResetTokenRepository
+                .findTopByEmailAndUsedAtIsNullAndInvalidatedAtIsNullOrderByCreatedAtDesc(email)
+                .orElseThrow(() -> new BadRequestException("Código inválido o expirado."));
 
-        if (twoFactorToken.getInvalidatedAt() != null) {
-            throw new BadRequestException("El código fue reemplazado. Pedí uno nuevo.");
-        }
-        if (twoFactorToken.getUsedAt() != null) {
-            throw new BadRequestException("El código ya fue utilizado.");
-        }
-        if (LocalDateTime.now().isAfter(twoFactorToken.getExpiresAt())) {
+        if (LocalDateTime.now().isAfter(resetToken.getExpiresAt())) {
             throw new GoneException("El código expiró.");
         }
-        if (twoFactorToken.getAttempts() >= 5) {
+        if (resetToken.getAttempts() >= 5) {
             throw new BadRequestException("Demasiados intentos. Pedí un nuevo código.");
         }
-        if (!passwordEncoder.matches(req.getCodigo(), twoFactorToken.getCodigoHash())) {
-            twoFactorToken.setAttempts(twoFactorToken.getAttempts() + 1);
-            loginTwoFactorTokenRepository.save(twoFactorToken);
+        if (!passwordEncoder.matches(req.getCodigo(), resetToken.getCodigoHash())) {
+            resetToken.setAttempts(resetToken.getAttempts() + 1);
+            passwordResetTokenRepository.save(resetToken);
             throw new BadRequestException("Código inválido.");
         }
-
-        Credencial credencial = credencialRepository.findByEmail(twoFactorToken.getEmail())
-                .filter(c -> c.getPersonaId().equals(twoFactorToken.getPersonaId()))
-                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
-        Cliente cliente = clienteRepository.findById(credencial.getPersonaId())
-                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
-
-        if ("bloqueado".equals(estadoCliente(cliente))) {
-            throw new com.subastar.subastar.exception.ForbiddenException("Cuenta bloqueada (usuario derivado a la justicia)");
+        if (!req.getPassword().equals(req.getPasswordConfirmacion())) {
+            throw new BadRequestException("Las contraseñas no coinciden");
         }
 
-        twoFactorToken.setUsedAt(LocalDateTime.now());
-        loginTwoFactorTokenRepository.save(twoFactorToken);
-        return generarLoginResponse(credencial, cliente);
-    }
+        Credencial credencial = credencialRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+        credencial.setPasswordHash(passwordEncoder.encode(req.getPassword()));
+        credencialRepository.save(credencial);
 
-    public LoginTwoFactorStartResponse reenviarLogin2fa(LoginTwoFactorResendRequest req) {
-        LoginTwoFactorToken twoFactorToken = loginTwoFactorTokenRepository.findByChallengeId(req.getChallengeId())
-                .orElseThrow(() -> new ResourceNotFoundException("Challenge de inicio de sesión no encontrado"));
-
-        if (twoFactorToken.getUsedAt() != null) {
-            throw new BadRequestException("El login ya fue verificado.");
-        }
-        if (twoFactorToken.getInvalidatedAt() != null) {
-            throw new BadRequestException("El código fue reemplazado. Pedí uno nuevo.");
-        }
-
-        Credencial credencial = credencialRepository.findByEmail(twoFactorToken.getEmail())
-                .filter(c -> c.getPersonaId().equals(twoFactorToken.getPersonaId()))
-                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
-        Cliente cliente = clienteRepository.findById(credencial.getPersonaId())
-                .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
-
-        if ("bloqueado".equals(estadoCliente(cliente))) {
-            throw new com.subastar.subastar.exception.ForbiddenException("Cuenta bloqueada (usuario derivado a la justicia)");
-        }
-
-        return crearLoginTwoFactorToken(credencial, cliente);
+        resetToken.setUsedAt(LocalDateTime.now());
+        passwordResetTokenRepository.save(resetToken);
+        log.info("Contraseña actualizada por recuperación para email: {}", email);
     }
 
     @Transactional
@@ -245,45 +299,30 @@ public class AuthService {
         }
     }
 
+    private void invalidarPasswordResetTokensActivos(String email) {
+        List<PasswordResetToken> activos = passwordResetTokenRepository
+                .findByEmailAndUsedAtIsNullAndInvalidatedAtIsNull(email);
+        LocalDateTime now = LocalDateTime.now();
+        activos.forEach(token -> token.setInvalidatedAt(now));
+        passwordResetTokenRepository.saveAll(activos);
+    }
+
+    private String generarCodigoRegistro() {
+        return String.format("%04d", SECURE_RANDOM.nextInt(10000));
+    }
+
+    private String generarCodigoSeisDigitos() {
+        return String.format("%06d", SECURE_RANDOM.nextInt(1000000));
+    }
+
     private String estadoCliente(Cliente cliente) {
-        // Estado simplificado: activo para todos excepto casos específicos
         if (!"si".equals(cliente.getAdmitido())) return "bloqueado";
         return "activo";
     }
 
-    private LoginTwoFactorStartResponse crearLoginTwoFactorToken(Credencial credencial, Cliente cliente) {
-        invalidarLoginTwoFactorTokensActivos(credencial.getEmail());
-
-        String codigo = String.format("%06d", SECURE_RANDOM.nextInt(1000000));
-        LoginTwoFactorToken twoFactorToken = new LoginTwoFactorToken();
-        twoFactorToken.setChallengeId(UUID.randomUUID().toString());
-        twoFactorToken.setEmail(credencial.getEmail());
-        twoFactorToken.setPersonaId(cliente.getIdentificador());
-        twoFactorToken.setCodigoHash(passwordEncoder.encode(codigo));
-        twoFactorToken.setExpiresAt(LocalDateTime.now().plusMinutes(10));
-        loginTwoFactorTokenRepository.save(twoFactorToken);
-
-        emailService.enviarCodigoLogin2fa(credencial.getEmail(), codigo);
-
-        return new LoginTwoFactorStartResponse(
-                true,
-                twoFactorToken.getChallengeId(),
-                credencial.getEmail(),
-                "Te enviamos un código de verificación a tu correo."
-        );
-    }
-
-    private void invalidarLoginTwoFactorTokensActivos(String email) {
-        List<LoginTwoFactorToken> activos = loginTwoFactorTokenRepository
-                .findByEmailAndUsedAtIsNullAndInvalidatedAtIsNull(email);
-        LocalDateTime now = LocalDateTime.now();
-        activos.forEach(token -> token.setInvalidatedAt(now));
-        loginTwoFactorTokenRepository.saveAll(activos);
-    }
-
-    private LoginResponse generarLoginResponse(Credencial credencial, Cliente cliente) {
+    private LoginResponse generarLoginResponse(Credencial credencial, Cliente cliente, Persona persona) {
         String token = jwtUtil.generateToken(credencial.getEmail(), cliente.getIdentificador(), cliente.getCategoria());
-        UsuarioResumen resumen = buildResumen(cliente, credencial.getEmail(), credencial.getPersona());
+        UsuarioResumen resumen = buildResumen(cliente, credencial.getEmail(), persona);
         return new LoginResponse(token, "Bearer", resumen);
     }
 

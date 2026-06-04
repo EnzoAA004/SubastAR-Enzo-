@@ -46,8 +46,10 @@ public class SecurityConfig {
             .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint()))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.POST, "/auth/registro", "/auth/verificar-codigo",
-                        "/auth/completar-registro", "/auth/login", "/auth/login/verificar-2fa",
-                        "/auth/login/reenviar-2fa").permitAll()
+                        "/auth/completar-registro", "/auth/login", "/auth/registro/reenviar-codigo",
+                        "/auth/registro-pendiente/cancelar", "/auth/recuperar-password",
+                        "/auth/recuperar-password/confirmar").permitAll()
+                .requestMatchers(HttpMethod.GET, "/health/ping").permitAll()
                 .requestMatchers(HttpMethod.GET, "/subastas/*/resultado/**").authenticated()
                 .requestMatchers(HttpMethod.GET, "/subastas", "/subastas/**", "/fotos/**", "/paises", "/divisas").permitAll()
                 .anyRequest().authenticated()
